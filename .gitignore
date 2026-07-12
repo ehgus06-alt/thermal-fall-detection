@@ -1,0 +1,33 @@
+# --- Data (NEVER commit: huge / not ours to redistribute) ---
+# 2.3GB Lepton-emulated frame cache (regenerate via cache_frames.py)
+cache/
+# raw dataset (147k frames)
+/Thermal/
+**/Fall/
+**/NonFall/
+
+# --- Generated outputs ---
+audit_out/
+capture_test_out/
+# runtime fall snapshots
+alarms/
+train_log.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Model checkpoints ---
+# best.pt (6MB) IS committed so the repo is usable out-of-the-box.
+# To exclude weights instead, uncomment:
+# runs/*.pt

@@ -1,0 +1,9 @@
+# Python 3.10+
+# For GPU (CUDA) torch, install from https://pytorch.org matching your CUDA version, e.g.:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+torch>=2.2
+torchvision>=0.17
+numpy>=1.24
+pillow>=9.0
+scikit-learn>=1.2
+opencv-python>=4.8   # live Lepton capture (list_cameras.py, lepton_live.py, capture_test.py)
