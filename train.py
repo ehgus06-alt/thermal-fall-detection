@@ -14,7 +14,7 @@ import torchvision
 
 from dataset import ClipBagDataset, collate_bags, load_manifest
 
-OUT = r"D:\써멀\THERMAL_ADL_FALL_LABEL\fall_ai\runs"
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runs")
 
 def build_model():
     m = torchvision.models.mobilenet_v3_small(weights=torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1)

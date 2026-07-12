@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-CACHE = r"D:\써멀\THERMAL_ADL_FALL_LABEL\fall_ai\cache"
+CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], np.float32)
 IMAGENET_STD  = np.array([0.229, 0.224, 0.225], np.float32)
 

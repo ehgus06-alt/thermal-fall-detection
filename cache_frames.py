@@ -13,8 +13,9 @@ import numpy as np
 from PIL import Image
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-ROOT   = r"D:\써멀\THERMAL_ADL_FALL_LABEL\Thermal"
-CACHE  = r"D:\써멀\THERMAL_ADL_FALL_LABEL\fall_ai\cache"
+HERE   = os.path.dirname(os.path.abspath(__file__))
+ROOT   = os.environ.get("THERMAL_DATA", os.path.join(HERE, "..", "Thermal"))
+CACHE  = os.path.join(HERE, "cache")
 TARGET = 128          # cached square size
 MIN_FRAMES = 30       # drop clips shorter than this (e.g. NonFall65=12)
 

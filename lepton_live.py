@@ -18,7 +18,7 @@ import torch, torchvision, torch.nn as nn
 from PIL import Image
 from dataset import make_window_feat
 
-HERE  = r"D:\써멀\THERMAL_ADL_FALL_LABEL\fall_ai"
+HERE  = os.path.dirname(os.path.abspath(__file__))
 CKPT  = os.path.join(HERE, "runs", "best.pt")
 CACHE = os.path.join(HERE, "cache")
 

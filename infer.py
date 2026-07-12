@@ -15,8 +15,9 @@ import torch
 import torchvision, torch.nn as nn
 
 from dataset import make_window_feat, IMAGENET_MEAN, IMAGENET_STD
-CACHE = r"D:\써멀\THERMAL_ADL_FALL_LABEL\fall_ai\cache"
-CKPT  = r"D:\써멀\THERMAL_ADL_FALL_LABEL\fall_ai\runs\best.pt"
+HERE  = os.path.dirname(os.path.abspath(__file__))
+CACHE = os.path.join(HERE, "cache")
+CKPT  = os.path.join(HERE, "runs", "best.pt")
 
 def load_model(device):
     ck = torch.load(CKPT, map_location=device)

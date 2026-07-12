@@ -6,7 +6,7 @@ from PIL import Image
 import torch
 from lepton_live import prep_gray128, frame_to_gray, load_model, Detector
 
-HERE = r"D:\써멀\THERMAL_ADL_FALL_LABEL\fall_ai"
+HERE = os.path.dirname(os.path.abspath(__file__))
 OUT  = os.path.join(HERE, "capture_test_out")
 os.makedirs(OUT, exist_ok=True)
 

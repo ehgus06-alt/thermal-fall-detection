@@ -7,8 +7,9 @@ import os, numpy as np, torch, torchvision, torch.nn as nn
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import average_precision_score, precision_recall_fscore_support
 from dataset import make_window_feat, load_manifest
-CACHE = r"D:\써멀\THERMAL_ADL_FALL_LABEL\fall_ai\cache"
-CKPT  = r"D:\써멀\THERMAL_ADL_FALL_LABEL\fall_ai\runs\best.pt"
+HERE  = os.path.dirname(os.path.abspath(__file__))
+CACHE = os.path.join(HERE, "cache")
+CKPT  = os.path.join(HERE, "runs", "best.pt")
 
 dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 ck = torch.load(CKPT, map_location=dev)

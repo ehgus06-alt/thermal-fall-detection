@@ -9,8 +9,9 @@ import os, re, json, sys
 import numpy as np
 from PIL import Image
 
-ROOT = r"D:\써멀\THERMAL_ADL_FALL_LABEL\Thermal"
-OUT  = r"D:\써멀\THERMAL_ADL_FALL_LABEL\fall_ai\audit_out"
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.environ.get("THERMAL_DATA", os.path.join(HERE, "..", "Thermal"))
+OUT  = os.path.join(HERE, "audit_out")
 os.makedirs(OUT, exist_ok=True)
 
 DS = (160, 120)  # downscale for motion analysis (Lepton-like)
