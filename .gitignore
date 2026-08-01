@@ -11,7 +11,7 @@ audit_out/
 capture_test_out/
 # runtime fall snapshots
 alarms/
-train_log.json
+train_log*.json
 
 # --- Python ---
 __pycache__/
@@ -28,6 +28,6 @@ Thumbs.db
 .idea/
 
 # --- Model checkpoints ---
-# best.pt (6MB) IS committed so the repo is usable out-of-the-box.
-# To exclude weights instead, uncomment:
-# runs/*.pt
+# ship only the final deployment model (best.pt); ignore experiment checkpoints
+runs/*.pt
+!runs/best.pt

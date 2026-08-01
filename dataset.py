@@ -18,8 +18,19 @@ IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], np.float32)
 IMAGENET_STD  = np.array([0.229, 0.224, 0.225], np.float32)
 
 def load_manifest():
+    """Merge all dataset manifests, tagging each clip with its source."""
+    man = []
     with open(os.path.join(CACHE, 'manifest.json'), encoding='utf-8') as f:
-        return json.load(f)
+        for r in json.load(f):
+            r.setdefault('source', 'flir')
+            man.append(r)
+    khan = os.path.join(CACHE, 'manifest_khan.json')
+    if os.path.exists(khan):
+        with open(khan, encoding='utf-8') as f:
+            for r in json.load(f):
+                r.setdefault('source', 'khan')
+                man.append(r)
+    return man
 
 def window_starts(n, W, stride):
     if n <= W:

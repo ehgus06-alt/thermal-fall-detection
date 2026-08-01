@@ -63,21 +63,42 @@ def main():
     ap.add_argument('--stride', type=int, default=8)
     ap.add_argument('--lr', type=float, default=3e-4)
     ap.add_argument('--seed', type=int, default=42)
+    ap.add_argument('--train_source', default='all', help="'all' | 'flir' | 'khan'")
+    ap.add_argument('--eval_source', default='all', help="'all' | 'flir' | 'khan' (differ from train => cross-dataset)")
+    ap.add_argument('--tag', default='', help='suffix for checkpoint/log filenames')
+    ap.add_argument('--full', action='store_true', help='train on ALL clips, no val split (final deploy model)')
+    ap.add_argument('--deploy_thr', type=float, default=0.5, help='threshold embedded in --full model')
     args = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
     torch.manual_seed(args.seed); np.random.seed(args.seed)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     man = load_manifest()
-    labels = [r['label'] for r in man]
-    tr, va = train_test_split(man, test_size=0.2, stratify=labels, random_state=args.seed)
-    print(f"train {len(tr)} / val {len(va)} clips | "
-          f"train pos={sum(r['label'] for r in tr)} val pos={sum(r['label'] for r in va)}", flush=True)
+    pick = lambda s: man if s == 'all' else [r for r in man if r.get('source') == s]
+    from collections import Counter
+    comp = lambda rows: dict(Counter(r.get('source') for r in rows))
+    if args.full:                                             # final deploy: ALL clips, no val
+        tr, va = pick(args.train_source), None
+    elif args.train_source == args.eval_source:               # in-domain: random split
+        pool = pick(args.train_source)
+        tr, va = train_test_split(pool, test_size=0.2,
+                                  stratify=[r['label'] for r in pool], random_state=args.seed)
+    else:                                                     # cross-dataset: train on one, test on other
+        tr, va = pick(args.train_source), pick(args.eval_source)
+
+    if va is None:
+        print(f"FULL train[{args.train_source}] {len(tr)} clips {comp(tr)} "
+              f"pos={sum(r['label'] for r in tr)} | no val split", flush=True)
+    else:
+        print(f"train[{args.train_source}] {len(tr)} clips {comp(tr)} pos={sum(r['label'] for r in tr)} | "
+              f"val[{args.eval_source}] {len(va)} clips {comp(va)} pos={sum(r['label'] for r in va)}", flush=True)
 
     tr_ds = ClipBagDataset(tr, W=args.W, stride=args.stride, K=args.K, train=True)
-    va_ds = ClipBagDataset(va, W=args.W, stride=args.stride, train=False)
     tr_ld = DataLoader(tr_ds, batch_size=args.bs, shuffle=True, num_workers=0, collate_fn=collate_bags)
-    va_ld = DataLoader(va_ds, batch_size=4, shuffle=False, num_workers=0, collate_fn=collate_bags)
+    va_ld = None
+    if va is not None:
+        va_ds = ClipBagDataset(va, W=args.W, stride=args.stride, train=False)
+        va_ld = DataLoader(va_ds, batch_size=4, shuffle=False, num_workers=0, collate_fn=collate_bags)
 
     model = build_model().to(device)
     npos = sum(r['label'] for r in tr); nneg = len(tr) - npos
@@ -99,19 +120,30 @@ def main():
             scaler.scale(loss).backward(); scaler.step(opt); scaler.update()
             tot += loss.item() * len(labels)
         sched.step()
-        m = evaluate(model, va_ld, device)
-        m.update(epoch=ep, train_loss=tot / len(tr), sec=round(time.time() - t0, 1))
-        log.append(m)
-        print(f"ep{ep:02d} loss={m['train_loss']:.3f} AP={m['ap']:.3f} "
-              f"F1={m['f1']:.3f} P={m['precision']:.3f} R={m['recall']:.3f} "
-              f"thr={m['thr']:.2f} ({m['sec']}s)", flush=True)
-        if m['ap'] > best_ap:
-            best_ap = m['ap']
-            torch.save(dict(model=model.state_dict(), args=vars(args), metrics=m),
-                       os.path.join(OUT, 'best.pt'))
-    with open(os.path.join(OUT, 'train_log.json'), 'w', encoding='utf-8') as f:
+        sec = round(time.time() - t0, 1)
+        if va_ld is not None:
+            m = evaluate(model, va_ld, device)
+            m.update(epoch=ep, train_loss=tot / len(tr), sec=sec)
+            log.append(m)
+            print(f"ep{ep:02d} loss={m['train_loss']:.3f} AP={m['ap']:.3f} "
+                  f"F1={m['f1']:.3f} P={m['precision']:.3f} R={m['recall']:.3f} "
+                  f"thr={m['thr']:.2f} ({sec}s)", flush=True)
+            if m['ap'] > best_ap:
+                best_ap = m['ap']
+                torch.save(dict(model=model.state_dict(), args=vars(args), metrics=m),
+                           os.path.join(OUT, f'best{args.tag}.pt'))
+        else:                                                 # --full: save final-epoch model
+            log.append(dict(epoch=ep, train_loss=tot / len(tr), sec=sec))
+            print(f"ep{ep:02d} loss={tot / len(tr):.3f} (full-train, {sec}s)", flush=True)
+            torch.save(dict(model=model.state_dict(), args=vars(args),
+                            metrics=dict(thr=args.deploy_thr, n_train=len(tr), note='full-train, no val')),
+                       os.path.join(OUT, f'best{args.tag}.pt'))
+    with open(os.path.join(OUT, f'train_log{args.tag}.json'), 'w', encoding='utf-8') as f:
         json.dump(dict(args=vars(args), log=log, best_ap=best_ap), f, indent=2)
-    print(f"done. best val AP={best_ap:.3f} -> {os.path.join(OUT,'best.pt')}", flush=True)
+    if va_ld is not None:
+        print(f"done. best val AP={best_ap:.3f} -> {os.path.join(OUT, f'best{args.tag}.pt')}", flush=True)
+    else:
+        print(f"done. FULL model on {len(tr)} clips -> {os.path.join(OUT, f'best{args.tag}.pt')}", flush=True)
 
 if __name__ == '__main__':
     main()
