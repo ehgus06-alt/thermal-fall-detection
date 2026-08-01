@@ -11,7 +11,9 @@ OUT  = os.path.join(HERE, "capture_test_out")
 os.makedirs(OUT, exist_ok=True)
 
 def open_cam(idx):
-    for be, name in [(cv2.CAP_MSMF, 'MSMF'), (cv2.CAP_DSHOW, 'DSHOW'), (cv2.CAP_ANY, 'ANY')]:
+    backends = ([(cv2.CAP_MSMF, 'MSMF'), (cv2.CAP_DSHOW, 'DSHOW'), (cv2.CAP_ANY, 'ANY')]
+                if os.name == 'nt' else [(cv2.CAP_V4L2, 'V4L2'), (cv2.CAP_ANY, 'ANY')])
+    for be, name in backends:
         cap = cv2.VideoCapture(idx, be)
         cap.set(cv2.CAP_PROP_CONVERT_RGB, 1)
         time.sleep(0.8)

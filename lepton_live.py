@@ -64,10 +64,15 @@ class Detector:
         return p, self.ema
 
 # ---------- frame sources ----------
+def camera_backends():
+    # Windows: PureThermal streams via MSMF (DSHOW fails). Linux (Raspberry Pi): V4L2.
+    if os.name == 'nt':
+        return [(cv2.CAP_MSMF, 'MSMF'), (cv2.CAP_DSHOW, 'DSHOW'), (cv2.CAP_ANY, 'ANY')]
+    return [(cv2.CAP_V4L2, 'V4L2'), (cv2.CAP_ANY, 'ANY')]
+
 def camera_source(idx, y16):
-    # PureThermal streams via MSMF (DSHOW fails to pull frames). Try backends + warm-up.
     cap = None
-    for be, name in [(cv2.CAP_MSMF, 'MSMF'), (cv2.CAP_DSHOW, 'DSHOW'), (cv2.CAP_ANY, 'ANY')]:
+    for be, name in camera_backends():
         c = cv2.VideoCapture(int(idx), be)
         if y16:
             c.set(cv2.CAP_PROP_CONVERT_RGB, 0)
