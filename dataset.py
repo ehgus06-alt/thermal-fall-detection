@@ -24,12 +24,13 @@ def load_manifest():
         for r in json.load(f):
             r.setdefault('source', 'flir')
             man.append(r)
-    khan = os.path.join(CACHE, 'manifest_khan.json')
-    if os.path.exists(khan):
-        with open(khan, encoding='utf-8') as f:
-            for r in json.load(f):
-                r.setdefault('source', 'khan')
-                man.append(r)
+    for extra, src in [('manifest_khan.json', 'khan'), ('manifest_mine.json', 'mine')]:
+        path = os.path.join(CACHE, extra)
+        if os.path.exists(path):
+            with open(path, encoding='utf-8') as f:
+                for r in json.load(f):
+                    r.setdefault('source', src)
+                    man.append(r)
     return man
 
 def window_starts(n, W, stride):
@@ -37,12 +38,37 @@ def window_starts(n, W, stride):
         return [0]
     return list(range(0, n - W + 1, stride))
 
-def make_window_feat(stack, s, W, motion_thr=12):
+def augment_stack(seg):
+    """Train-time augmentation on a [W,H,Wd] float32 window (0-255), applied CONSISTENTLY
+    across all frames so motion (MHI/MEI) stays coherent. No vertical flip (gravity matters)."""
+    if np.random.random() < 0.5:                     # h-flip (falls go left or right)
+        seg = seg[:, :, ::-1]
+    if np.random.random() < 0.7:                     # translation (camera position)
+        dy, dx = np.random.randint(-12, 13), np.random.randint(-12, 13)
+        seg = np.roll(seg, (dy, dx), axis=(1, 2))
+        if dy > 0: seg[:, :dy, :] = 0
+        elif dy < 0: seg[:, dy:, :] = 0
+        if dx > 0: seg[:, :, :dx] = 0
+        elif dx < 0: seg[:, :, dx:] = 0
+    if np.random.random() < 0.7:                     # brightness / contrast (thermal auto-gain)
+        seg = np.clip(seg * np.random.uniform(0.8, 1.2) + np.random.uniform(-20, 20), 0, 255)
+    if np.random.random() < 0.2:                     # polarity invert (white-hot <-> black-hot)
+        seg = 255.0 - seg
+    if np.random.random() < 0.3:                     # soft blur (Lepton low-res emulation)
+        seg = (seg + np.roll(seg, 1, 1) + np.roll(seg, -1, 1)
+               + np.roll(seg, 1, 2) + np.roll(seg, -1, 2)) / 5.0
+    if np.random.random() < 0.5:                     # sensor noise
+        seg = np.clip(seg + np.random.normal(0, np.random.uniform(2, 10), seg.shape), 0, 255)
+    return seg.astype(np.float32)
+
+def make_window_feat(stack, s, W, motion_thr=12, augment=False):
     """stack: uint8 [N,H,W]; returns float32 [3,H,W] normalized with ImageNet stats."""
     seg = stack[s:s+W].astype(np.float32)            # [W,H,Wd]
     H, Wd = seg.shape[1], seg.shape[2]
     if seg.shape[0] < W:                              # pad short (edge clips) by repeat
         seg = np.concatenate([seg, np.repeat(seg[-1:], W - seg.shape[0], 0)], 0)
+    if augment:
+        seg = augment_stack(seg)
     diffs = np.abs(np.diff(seg, axis=0))             # [W-1,H,Wd]
     mask = diffs > motion_thr
     # MHI: decay from W..0
@@ -58,10 +84,11 @@ def make_window_feat(stack, s, W, motion_thr=12):
 
 class ClipBagDataset(Dataset):
     """Returns a bag of K windows per clip. Train: random K. Eval: evenly-spaced up to max_eval."""
-    def __init__(self, records, W=24, stride=8, K=8, train=True, max_eval=16):
+    def __init__(self, records, W=24, stride=8, K=8, train=True, max_eval=16, augment=False):
         self.records = records
         self.W, self.stride, self.K = W, stride, K
         self.train, self.max_eval = train, max_eval
+        self.augment = augment
         self._cache = {}
 
     def _stack(self, rec):
@@ -89,7 +116,8 @@ class ClipBagDataset(Dataset):
                 chosen = [starts[j] for j in sel]
             else:
                 chosen = starts
-        feats = np.stack([make_window_feat(stack, s, self.W) for s in chosen], 0)  # [K,3,H,W]
+        aug = self.augment and self.train
+        feats = np.stack([make_window_feat(stack, s, self.W, augment=aug) for s in chosen], 0)  # [K,3,H,W]
         return torch.from_numpy(feats), torch.tensor(float(rec['label'])), i
 
 def collate_bags(batch):

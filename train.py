@@ -67,6 +67,7 @@ def main():
     ap.add_argument('--eval_source', default='all', help="'all' | 'flir' | 'khan' (differ from train => cross-dataset)")
     ap.add_argument('--tag', default='', help='suffix for checkpoint/log filenames')
     ap.add_argument('--full', action='store_true', help='train on ALL clips, no val split (final deploy model)')
+    ap.add_argument('--augment', action='store_true', help='train-time augmentation (flip/shift/bright/noise/blur/polarity)')
     ap.add_argument('--deploy_thr', type=float, default=0.5, help='threshold embedded in --full model')
     args = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
@@ -93,7 +94,7 @@ def main():
         print(f"train[{args.train_source}] {len(tr)} clips {comp(tr)} pos={sum(r['label'] for r in tr)} | "
               f"val[{args.eval_source}] {len(va)} clips {comp(va)} pos={sum(r['label'] for r in va)}", flush=True)
 
-    tr_ds = ClipBagDataset(tr, W=args.W, stride=args.stride, K=args.K, train=True)
+    tr_ds = ClipBagDataset(tr, W=args.W, stride=args.stride, K=args.K, train=True, augment=args.augment)
     tr_ld = DataLoader(tr_ds, batch_size=args.bs, shuffle=True, num_workers=0, collate_fn=collate_bags)
     va_ld = None
     if va is not None:

@@ -11,7 +11,7 @@ Preprocessing matches training exactly: grayscale -> per-frame 2-98% percentile 
 same 3-ch (gray/MHI/MEI) window into MobileNetV3. EMA-smoothed prob triggers an alarm with
 a cooldown; each alarm saves a snapshot.
 """
-import os, time, argparse, collections
+import os, time, argparse, collections, json, urllib.request, threading
 import numpy as np
 import cv2
 import torch, torchvision, torch.nn as nn
@@ -101,6 +101,19 @@ def camera_source(idx, y16):
         yield frame
     cap.release()
 
+def post_json(url, payload, timeout=4):
+    """POST a JSON payload in a background thread so detection never blocks on the network."""
+    def _send():
+        try:
+            data = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(url, data=data,
+                                         headers={'Content-Type': 'application/json'}, method='POST')
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                print(f"    webhook -> {url} [{r.status}]")
+        except Exception as e:
+            print(f"    webhook FAILED -> {url}: {e}")
+    threading.Thread(target=_send, daemon=True).start()
+
 def simclip_source(clip):
     cls, name = clip.split('/')
     stack = np.load(os.path.join(CACHE, cls, name + '.npy'))   # already 128 gray
@@ -118,6 +131,8 @@ def main():
     ap.add_argument('--persist', type=int, default=3, help='windows EMA must stay >=thr before alarm (kills brief blips)')
     ap.add_argument('--cooldown', type=float, default=5.0, help='seconds between alarms')
     ap.add_argument('--display', action='store_true', help='show HUD window (camera mode)')
+    ap.add_argument('--webhook', default=None, help='POST fall-event JSON to this URL on each alarm')
+    ap.add_argument('--device-id', default='lepton-01', help='device id included in webhook payload')
     args = ap.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -145,6 +160,12 @@ def main():
             snap = os.path.join(snap_dir, f"fall_{time.strftime('%Y%m%d_%H%M%S')}_{i}.png")
             Image.fromarray(gray128).resize((320, 320), Image.NEAREST).save(snap)
             print(f"  [{ts}] >>> FALL ALARM <<<  frame={i} p={p:.2f} ema={ema:.2f}  (snapshot: {os.path.basename(snap)})")
+            if args.webhook:
+                post_json(args.webhook, dict(
+                    event='fall', device_id=args.device_id,
+                    timestamp=time.strftime('%Y-%m-%dT%H:%M:%S'), unix_time=round(now, 3),
+                    probability=round(float(p), 3), ema=round(float(ema), 3),
+                    frame=int(i), snapshot=os.path.basename(snap)))
         elif p is not None and (ema > 0.3 or p > 0.5):
             print(f"  frame={i:4d} p={p:.2f} ema={ema:.2f}")
 
