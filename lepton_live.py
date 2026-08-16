@@ -130,6 +130,15 @@ def recent_descent(cy_hist, height):
         mn = min(mn, c); best = max(best, c - mn)
     return best / height
 
+def posture_aspect(gray, pct=92, min_pixels=25):
+    """Width/height of the warm blob. >1 = wide (lying), <1 = tall (standing). None if no blob.
+    Works best on a fixed live feed with a hot person over a cool room."""
+    m = gray >= np.percentile(gray, pct)
+    r, c = np.where(m)
+    if r.size < min_pixels:
+        return None
+    return (c.max() - c.min() + 1) / (r.max() - r.min() + 1)
+
 def simclip_source(clip):
     cls, name = clip.split('/')
     stack = np.load(os.path.join(CACHE, cls, name + '.npy'))   # already 128 gray
@@ -150,7 +159,9 @@ def main():
                     help='OFF by default (0). Optional per-camera gate: require this much fast blob drop '
                          '(frac of height) to allow an alarm. Does NOT generalize across viewpoints '
                          '(a value that helps one camera blocks real falls on another) - calibrate per fixed setup.')
-    ap.add_argument('--display', action='store_true', help='show HUD window (camera mode)')
+    ap.add_argument('--display', action='store_true', help='show HUD window (FALL / LIED / SAFE)')
+    ap.add_argument('--lie-aspect', type=float, default=1.4,
+                    help='blob width/height above this = LIED (lying) state shown in orange. Tune to your camera using the w/h shown on the HUD.')
     ap.add_argument('--webhook', default=None, help='POST fall-event JSON to this URL on each alarm')
     ap.add_argument('--device-id', default='lepton-01', help='device id included in webhook payload')
     args = ap.parse_args()
@@ -165,6 +176,7 @@ def main():
     src = simclip_source(args.simclip) if sim else camera_source(args.camera, args.y16)
     last_alarm = -1e9; n = 0; t0 = time.time(); fired_any = False; over = 0
     cy_hist = collections.deque(maxlen=15)     # blob centroid history for descent gate
+    aspect_hist = collections.deque(maxlen=8)  # blob w/h history for LIED posture state
     for i, frame in enumerate(src):
         gray128 = frame if sim else prep_gray128(frame_to_gray(frame, args.y16))
         if i % args.stride:
@@ -196,15 +208,28 @@ def main():
         elif p is not None and (ema > 0.3 or p > 0.5):
             print(f"  frame={i:4d} p={p:.2f} ema={ema:.2f}")
 
-        if args.display and not sim:
+        if args.display:
+            wh = posture_aspect(gray128)
+            if wh is not None:
+                aspect_hist.append(wh)
+            med_wh = float(np.median(aspect_hist)) if aspect_hist else 0.0
+            falling = (p is not None and ema >= args.thr)
+            lying = (med_wh >= args.lie_aspect)
+            if falling:                                   # red
+                label, col = "FALL", (0, 0, 255)
+            elif lying:                                   # orange
+                label, col = "LIED", (0, 165, 255)
+            else:                                         # green
+                label, col = "SAFE", (0, 200, 0)
             vis = cv2.cvtColor(cv2.resize(gray128, (384, 384), interpolation=cv2.INTER_NEAREST), cv2.COLOR_GRAY2BGR)
             bar = int((ema if p is not None else 0) * 384)
-            col = (0, 0, 255) if (p is not None and ema >= args.thr) else (0, 200, 0)
             cv2.rectangle(vis, (0, 378), (bar, 384), col, -1)
-            if p is not None and ema >= args.thr:
-                cv2.putText(vis, "FALL", (12, 44), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 0, 255), 3)
+            cv2.putText(vis, label, (12, 44), cv2.FONT_HERSHEY_SIMPLEX, 1.4, col, 3)
+            cv2.putText(vis, f"p={ema:.2f}  w/h={med_wh:.2f} (LIED>={args.lie_aspect})",
+                        (12, 372), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             cv2.imshow('lepton-fall', vis)
-            if cv2.waitKey(1) & 0xFF == ord('q'): break
+            if cv2.waitKey(20 if sim else 1) & 0xFF == ord('q'):
+                break
     fps = n / max(time.time() - t0, 1e-6)
     print(f"processed {n} windows @ {fps:.1f} win/s. result: "
           f"{'FALL detected' if fired_any else 'no fall'}")
