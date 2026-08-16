@@ -175,6 +175,7 @@ def main():
     sim = args.simclip is not None
     src = simclip_source(args.simclip) if sim else camera_source(args.camera, args.y16)
     last_alarm = -1e9; n = 0; t0 = time.time(); fired_any = False; over = 0
+    fall_latched = False; upright_count = 0    # FALL stays latched until person stands up again
     cy_hist = collections.deque(maxlen=15)     # blob centroid history for descent gate
     aspect_hist = collections.deque(maxlen=8)  # blob w/h history for LIED posture state
     for i, frame in enumerate(src):
@@ -187,18 +188,36 @@ def main():
         cy_hist.append(blob_centroid_y(gray128))
         descent = recent_descent(cy_hist, gray128.shape[0])
         over = over + 1 if (p is not None and ema >= args.thr) else 0
-        # descent gate: model says fall AND there was a fast downward drop (not a slow lie-down)
+        # descent gate: model says fall AND (optionally) a fast downward drop
         alarm = (over >= args.persist and now - last_alarm > args.cooldown
                  and descent >= args.min_descent)
+
+        # posture + FALL-latch state machine.
+        # LIED vs FALL is NOT about the pose (both end wide/horizontal) but about HOW you got
+        # there: a fall fires the model -> FALL latched until you stand up again; a slow
+        # lie-down never fires -> LIED. Aspect only tells us "is the person still down".
+        wh = posture_aspect(gray128)
+        if wh is not None:
+            aspect_hist.append(wh)
+        med_wh = float(np.median(aspect_hist)) if aspect_hist else 0.0
+        lying = med_wh >= args.lie_aspect
+        if alarm:
+            fall_latched = True; upright_count = 0
+        elif not lying:
+            upright_count += 1
+            if upright_count >= 8:                # sustained upright -> person got back up
+                fall_latched = False
+        else:
+            upright_count = 0
+        state = 'FALL' if fall_latched else ('LIED' if lying else 'SAFE')
+
         if alarm:
             last_alarm = now; fired_any = True
             ts = time.strftime('%H:%M:%S')
             # NOTE: cv2.imwrite fails silently on non-ASCII (Korean) paths -> use PIL
             snap = os.path.join(snap_dir, f"fall_{time.strftime('%Y%m%d_%H%M%S')}_{i}.png")
             Image.fromarray(gray128).resize((320, 320), Image.NEAREST).save(snap)
-            print(f"  [{ts}] >>> FALL ALARM <<<  frame={i} p={p:.2f} ema={ema:.2f} descent={descent:.2f}  (snapshot: {os.path.basename(snap)})")
-        elif over >= args.persist and now - last_alarm > args.cooldown and descent < args.min_descent:
-            print(f"  frame={i:4d} p={p:.2f} ema={ema:.2f} descent={descent:.2f}  <- 모델은 낙상, but 느린 하강 -> 억제(눕기로 판단)")
+            print(f"  [{ts}] >>> FALL ALARM <<<  frame={i} p={p:.2f} ema={ema:.2f}  (snapshot: {os.path.basename(snap)})")
             if args.webhook:
                 post_json(args.webhook, dict(
                     event='fall', device_id=args.device_id,
@@ -206,21 +225,11 @@ def main():
                     probability=round(float(p), 3), ema=round(float(ema), 3),
                     frame=int(i), snapshot=os.path.basename(snap)))
         elif p is not None and (ema > 0.3 or p > 0.5):
-            print(f"  frame={i:4d} p={p:.2f} ema={ema:.2f}")
+            print(f"  frame={i:4d} p={p:.2f} ema={ema:.2f} state={state}")
 
         if args.display:
-            wh = posture_aspect(gray128)
-            if wh is not None:
-                aspect_hist.append(wh)
-            med_wh = float(np.median(aspect_hist)) if aspect_hist else 0.0
-            falling = (p is not None and ema >= args.thr)
-            lying = (med_wh >= args.lie_aspect)
-            if falling:                                   # red
-                label, col = "FALL", (0, 0, 255)
-            elif lying:                                   # orange
-                label, col = "LIED", (0, 165, 255)
-            else:                                         # green
-                label, col = "SAFE", (0, 200, 0)
+            col = {'FALL': (0, 0, 255), 'LIED': (0, 165, 255), 'SAFE': (0, 200, 0)}[state]
+            label = state
             vis = cv2.cvtColor(cv2.resize(gray128, (384, 384), interpolation=cv2.INTER_NEAREST), cv2.COLOR_GRAY2BGR)
             bar = int((ema if p is not None else 0) * 384)
             cv2.rectangle(vis, (0, 378), (bar, 384), col, -1)
