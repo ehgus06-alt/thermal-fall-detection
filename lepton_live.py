@@ -114,6 +114,22 @@ def post_json(url, payload, timeout=4):
             print(f"    webhook FAILED -> {url}: {e}")
     threading.Thread(target=_send, daemon=True).start()
 
+def blob_centroid_y(gray, pct=88):
+    """Vertical centroid (row) of the warm blob = brightest pixels. None if none found."""
+    rows = np.where(gray >= np.percentile(gray, pct))[0]
+    return float(rows.mean()) if rows.size else None
+
+def recent_descent(cy_hist, height):
+    """Largest downward drop of the blob centroid over recent history, as a fraction of frame height.
+    Fast fall -> big drop within the short window; slow lie-down -> small drop."""
+    vals = [c for c in cy_hist if c is not None]
+    if len(vals) < 2:
+        return 0.0
+    mn, best = vals[0], 0.0
+    for c in vals:
+        mn = min(mn, c); best = max(best, c - mn)
+    return best / height
+
 def simclip_source(clip):
     cls, name = clip.split('/')
     stack = np.load(os.path.join(CACHE, cls, name + '.npy'))   # already 128 gray
@@ -130,6 +146,10 @@ def main():
     ap.add_argument('--stride', type=int, default=1, help='run model every N frames')
     ap.add_argument('--persist', type=int, default=3, help='windows EMA must stay >=thr before alarm (kills brief blips)')
     ap.add_argument('--cooldown', type=float, default=5.0, help='seconds between alarms')
+    ap.add_argument('--min-descent', type=float, default=0.0,
+                    help='OFF by default (0). Optional per-camera gate: require this much fast blob drop '
+                         '(frac of height) to allow an alarm. Does NOT generalize across viewpoints '
+                         '(a value that helps one camera blocks real falls on another) - calibrate per fixed setup.')
     ap.add_argument('--display', action='store_true', help='show HUD window (camera mode)')
     ap.add_argument('--webhook', default=None, help='POST fall-event JSON to this URL on each alarm')
     ap.add_argument('--device-id', default='lepton-01', help='device id included in webhook payload')
@@ -144,6 +164,7 @@ def main():
     sim = args.simclip is not None
     src = simclip_source(args.simclip) if sim else camera_source(args.camera, args.y16)
     last_alarm = -1e9; n = 0; t0 = time.time(); fired_any = False; over = 0
+    cy_hist = collections.deque(maxlen=15)     # blob centroid history for descent gate
     for i, frame in enumerate(src):
         gray128 = frame if sim else prep_gray128(frame_to_gray(frame, args.y16))
         if i % args.stride:
@@ -151,15 +172,21 @@ def main():
         p, ema = det.push(gray128)
         n += 1
         now = time.time()
+        cy_hist.append(blob_centroid_y(gray128))
+        descent = recent_descent(cy_hist, gray128.shape[0])
         over = over + 1 if (p is not None and ema >= args.thr) else 0
-        alarm = (over >= args.persist and now - last_alarm > args.cooldown)
+        # descent gate: model says fall AND there was a fast downward drop (not a slow lie-down)
+        alarm = (over >= args.persist and now - last_alarm > args.cooldown
+                 and descent >= args.min_descent)
         if alarm:
             last_alarm = now; fired_any = True
             ts = time.strftime('%H:%M:%S')
             # NOTE: cv2.imwrite fails silently on non-ASCII (Korean) paths -> use PIL
             snap = os.path.join(snap_dir, f"fall_{time.strftime('%Y%m%d_%H%M%S')}_{i}.png")
             Image.fromarray(gray128).resize((320, 320), Image.NEAREST).save(snap)
-            print(f"  [{ts}] >>> FALL ALARM <<<  frame={i} p={p:.2f} ema={ema:.2f}  (snapshot: {os.path.basename(snap)})")
+            print(f"  [{ts}] >>> FALL ALARM <<<  frame={i} p={p:.2f} ema={ema:.2f} descent={descent:.2f}  (snapshot: {os.path.basename(snap)})")
+        elif over >= args.persist and now - last_alarm > args.cooldown and descent < args.min_descent:
+            print(f"  frame={i:4d} p={p:.2f} ema={ema:.2f} descent={descent:.2f}  <- 모델은 낙상, but 느린 하강 -> 억제(눕기로 판단)")
             if args.webhook:
                 post_json(args.webhook, dict(
                     event='fall', device_id=args.device_id,
