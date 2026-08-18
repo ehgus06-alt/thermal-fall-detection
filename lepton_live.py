@@ -22,6 +22,11 @@ HERE  = os.path.dirname(os.path.abspath(__file__))
 CKPT  = os.path.join(HERE, "runs", "best.pt")
 CACHE = os.path.join(HERE, "cache")
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  백엔드 주소: 이 한 줄만 당신 서버 주소로 바꾸세요 (또는 실행 시 --webhook 로 지정)
+WEBHOOK_URL = ""      # 예: "https://your-site.com/api/fall"
+# ═══════════════════════════════════════════════════════════════════════════
+
 # ---------- preprocessing (identical to cache_frames.py) ----------
 def prep_gray128(gray_u8, target=128):
     a = gray_u8.astype(np.float32)
@@ -162,7 +167,8 @@ def main():
     ap.add_argument('--display', action='store_true', help='show HUD window (FALL / LIED / SAFE)')
     ap.add_argument('--lie-aspect', type=float, default=1.4,
                     help='blob width/height above this = LIED (lying) state shown in orange. Tune to your camera using the w/h shown on the HUD.')
-    ap.add_argument('--webhook', default=None, help='POST fall-event JSON to this URL on each alarm')
+    ap.add_argument('--webhook', default=WEBHOOK_URL, help='backend URL for the sustained-fall JSON (default = WEBHOOK_URL at top of file)')
+    ap.add_argument('--fall-hold', type=float, default=3.0, help='seconds a FALL must stay held before the backend signal is sent')
     ap.add_argument('--device-id', default='lepton-01', help='device id included in webhook payload')
     args = ap.parse_args()
 
@@ -176,6 +182,7 @@ def main():
     src = simclip_source(args.simclip) if sim else camera_source(args.camera, args.y16)
     last_alarm = -1e9; n = 0; t0 = time.time(); fired_any = False; over = 0
     fall_latched = False; upright_count = 0    # FALL stays latched until person stands up again
+    fall_start = 0.0; webhook_sent = False; fall_prob = 0.0   # sustained-fall backend signal
     cy_hist = collections.deque(maxlen=15)     # blob centroid history for descent gate
     aspect_hist = collections.deque(maxlen=8)  # blob w/h history for LIED posture state
     for i, frame in enumerate(src):
@@ -202,6 +209,8 @@ def main():
         med_wh = float(np.median(aspect_hist)) if aspect_hist else 0.0
         lying = med_wh >= args.lie_aspect
         if alarm:
+            if not fall_latched:                  # entering FALL: start the hold timer
+                fall_start = now; webhook_sent = False; fall_prob = float(ema)
             fall_latched = True; upright_count = 0
         elif not lying:
             upright_count += 1
@@ -211,19 +220,24 @@ def main():
             upright_count = 0
         state = 'FALL' if fall_latched else ('LIED' if lying else 'SAFE')
 
+        # backend signal: only when the FALL has been HELD for --fall-hold seconds (fell & still down)
+        if fall_latched and not webhook_sent and (now - fall_start) >= args.fall_hold:
+            webhook_sent = True
+            held = round(now - fall_start, 1)
+            print(f"  >>> FALL held {held}s -> backend signal {'sent' if args.webhook else '(no URL set)'}")
+            if args.webhook:
+                post_json(args.webhook, dict(
+                    event='fall', device_id=args.device_id,
+                    timestamp=time.strftime('%Y-%m-%dT%H:%M:%S'), unix_time=round(now, 3),
+                    held_seconds=held, probability=round(fall_prob, 3), frame=int(i)))
+
         if alarm:
             last_alarm = now; fired_any = True
             ts = time.strftime('%H:%M:%S')
             # NOTE: cv2.imwrite fails silently on non-ASCII (Korean) paths -> use PIL
             snap = os.path.join(snap_dir, f"fall_{time.strftime('%Y%m%d_%H%M%S')}_{i}.png")
             Image.fromarray(gray128).resize((320, 320), Image.NEAREST).save(snap)
-            print(f"  [{ts}] >>> FALL ALARM <<<  frame={i} p={p:.2f} ema={ema:.2f}  (snapshot: {os.path.basename(snap)})")
-            if args.webhook:
-                post_json(args.webhook, dict(
-                    event='fall', device_id=args.device_id,
-                    timestamp=time.strftime('%Y-%m-%dT%H:%M:%S'), unix_time=round(now, 3),
-                    probability=round(float(p), 3), ema=round(float(ema), 3),
-                    frame=int(i), snapshot=os.path.basename(snap)))
+            print(f"  [{ts}] >>> FALL detected <<<  frame={i} p={p:.2f} ema={ema:.2f}  (hold {args.fall_hold}s for backend signal)")
         elif p is not None and (ema > 0.3 or p > 0.5):
             print(f"  frame={i:4d} p={p:.2f} ema={ema:.2f} state={state}")
 
