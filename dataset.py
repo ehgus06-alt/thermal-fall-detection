@@ -24,7 +24,8 @@ def load_manifest():
         for r in json.load(f):
             r.setdefault('source', 'flir')
             man.append(r)
-    for extra, src in [('manifest_khan.json', 'khan'), ('manifest_mine.json', 'mine')]:
+    for extra, src in [('manifest_khan.json', 'khan'), ('manifest_mine.json', 'mine'),
+                       ('manifest_silver.json', 'silver')]:
         path = os.path.join(CACHE, extra)
         if os.path.exists(path):
             with open(path, encoding='utf-8') as f:
