@@ -106,6 +106,21 @@ def camera_source(idx, y16):
         yield frame
     cap.release()
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  백엔드로 보낼 JSON 형식: 나중에 형식이 정해지면 여기 dict 만 바꾸면 됩니다.
+#  아래는 자리표시용(placeholder) 기본 형식 — 필드 추가/이름 변경 자유롭게.
+def build_fall_payload(*, device_id, now, frame_idx, held_seconds, probability):
+    return {
+        "event":        "fall",
+        "device_id":    device_id,
+        "timestamp":    time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(now)),
+        "unix_time":    round(now, 3),
+        "held_seconds": held_seconds,
+        "probability":  round(probability, 3),
+        "frame":        int(frame_idx),
+    }
+# ═══════════════════════════════════════════════════════════════════════════
+
 def post_json(url, payload, timeout=4):
     """POST a JSON payload in a background thread so detection never blocks on the network."""
     def _send():
@@ -144,6 +159,36 @@ def posture_aspect(gray, pct=92, min_pixels=25):
         return None
     return (c.max() - c.min() + 1) / (r.max() - r.min() + 1)
 
+def person_bbox(gray, pct=92, min_pixels=25):
+    """Tight bounding box (x0,y0,x1,y1) around the warm blob (brightest pixels), or None if too small.
+    Same thresholding as posture_aspect so FALL/LIED geometry stays consistent."""
+    m = gray >= np.percentile(gray, pct)
+    r, c = np.where(m)
+    if r.size < min_pixels:
+        return None
+    return int(c.min()), int(r.min()), int(c.max()), int(r.max())
+
+def bbox_aspect(bb):
+    """width/height of a bbox. >1 = wide (lying), <1 = tall (standing)."""
+    x0, y0, x1, y1 = bb
+    return (x1 - x0 + 1) / (y1 - y0 + 1)
+
+def collapse_metrics(bbox_hist, height, lookback):
+    """How FAST the person's box is flattening over the last `lookback` seconds:
+       da   = aspect (w/h) increase across the window   -> box going tall -> wide
+       dtop = how far the TOP edge dropped, frac of height -> head/shoulders coming down
+    A fall flattens fast (big da/dtop in <~0.5s); a controlled lie-down barely registers.
+    bbox_hist holds (t, aspect, top_y) tuples; returns (0,0) until >=2 samples are in-window."""
+    if len(bbox_hist) < 2:
+        return 0.0, 0.0
+    t_now = bbox_hist[-1][0]
+    win = [x for x in bbox_hist if t_now - x[0] <= lookback]
+    if len(win) < 2:
+        win = list(bbox_hist)[-2:]
+    da   = win[-1][1] - win[0][1]
+    dtop = (win[-1][2] - win[0][2]) / max(height, 1)
+    return max(da, 0.0), max(dtop, 0.0)
+
 def simclip_source(clip):
     cls, name = clip.split('/')
     stack = np.load(os.path.join(CACHE, cls, name + '.npy'))   # already 128 gray
@@ -170,6 +215,16 @@ def main():
     ap.add_argument('--webhook', default=WEBHOOK_URL, help='backend URL for the sustained-fall JSON (default = WEBHOOK_URL at top of file)')
     ap.add_argument('--fall-hold', type=float, default=3.0, help='seconds a FALL must stay held before the backend signal is sent')
     ap.add_argument('--device-id', default='lepton-01', help='device id included in webhook payload')
+    ap.add_argument('--collapse-lookback', type=float, default=0.6,
+                    help='seconds of bbox history used to measure how fast the person box flattens')
+    ap.add_argument('--collapse-aspect', type=float, default=0.8,
+                    help='bbox width/height must widen by at least this within the lookback to count as a FAST (fall-like) collapse')
+    ap.add_argument('--collapse-drop', type=float, default=0.18,
+                    help='OR the bbox TOP edge drops by at least this fraction of frame height within the lookback')
+    ap.add_argument('--collapse-trigger', action='store_true',
+                    help='let a FAST bbox collapse latch FALL on its own (catches CNN misses). OFF by default: '
+                         'collapse thresholds are viewpoint-dependent - calibrate per fixed camera by watching da/dtop on the '
+                         'HUD, and they can false-fire on fast sit-downs. Leave off to keep the CNN as the sole trigger.')
     args = ap.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -185,6 +240,7 @@ def main():
     fall_start = 0.0; webhook_sent = False; fall_prob = 0.0   # sustained-fall backend signal
     cy_hist = collections.deque(maxlen=15)     # blob centroid history for descent gate
     aspect_hist = collections.deque(maxlen=8)  # blob w/h history for LIED posture state
+    bbox_hist = collections.deque(maxlen=30)   # (t, aspect, top_y) history for bbox collapse-speed
     for i, frame in enumerate(src):
         gray128 = frame if sim else prep_gray128(frame_to_gray(frame, args.y16))
         if i % args.stride:
@@ -194,10 +250,19 @@ def main():
         now = time.time()
         cy_hist.append(blob_centroid_y(gray128))
         descent = recent_descent(cy_hist, gray128.shape[0])
+        # bbox collapse-speed: how fast the warm-blob box flattens (fall) vs eases down (lie-down)
+        bb = person_bbox(gray128)
+        if bb is not None:
+            bbox_hist.append((now, bbox_aspect(bb), bb[1]))
+        da, dtop = collapse_metrics(bbox_hist, gray128.shape[0], args.collapse_lookback)
+        fast_collapse = da >= args.collapse_aspect or dtop >= args.collapse_drop
         over = over + 1 if (p is not None and ema >= args.thr) else 0
-        # descent gate: model says fall AND (optionally) a fast downward drop
-        alarm = (over >= args.persist and now - last_alarm > args.cooldown
-                 and descent >= args.min_descent)
+        # two independent FALL triggers, both respecting the cooldown:
+        #   model_alarm    = CNN motion window says fall (+ optional descent gate)
+        #   collapse_alarm = bbox flattened FAST (fall-like), only when --collapse-trigger is on
+        model_alarm = over >= args.persist and descent >= args.min_descent
+        collapse_alarm = args.collapse_trigger and fast_collapse
+        alarm = (model_alarm or collapse_alarm) and now - last_alarm > args.cooldown
 
         # posture + FALL-latch state machine.
         # LIED vs FALL is NOT about the pose (both end wide/horizontal) but about HOW you got
@@ -226,28 +291,37 @@ def main():
             held = round(now - fall_start, 1)
             print(f"  >>> FALL held {held}s -> backend signal {'sent' if args.webhook else '(no URL set)'}")
             if args.webhook:
-                post_json(args.webhook, dict(
-                    event='fall', device_id=args.device_id,
-                    timestamp=time.strftime('%Y-%m-%dT%H:%M:%S'), unix_time=round(now, 3),
-                    held_seconds=held, probability=round(fall_prob, 3), frame=int(i)))
+                payload = build_fall_payload(
+                    device_id=args.device_id, now=now, frame_idx=i,
+                    held_seconds=held, probability=fall_prob)
+                post_json(args.webhook, payload)
 
         if alarm:
             last_alarm = now; fired_any = True
             ts = time.strftime('%H:%M:%S')
+            trig = 'model' if model_alarm else 'collapse'
+            pstr = f"{p:.2f}" if p is not None else "--"
             # NOTE: cv2.imwrite fails silently on non-ASCII (Korean) paths -> use PIL
             snap = os.path.join(snap_dir, f"fall_{time.strftime('%Y%m%d_%H%M%S')}_{i}.png")
             Image.fromarray(gray128).resize((320, 320), Image.NEAREST).save(snap)
-            print(f"  [{ts}] >>> FALL detected <<<  frame={i} p={p:.2f} ema={ema:.2f}  (hold {args.fall_hold}s for backend signal)")
+            print(f"  [{ts}] >>> FALL detected <<<  frame={i} p={pstr} ema={ema:.2f} via={trig} "
+                  f"da={da:.2f} dtop={dtop:.2f}  (hold {args.fall_hold}s for backend signal)")
         elif p is not None and (ema > 0.3 or p > 0.5):
-            print(f"  frame={i:4d} p={p:.2f} ema={ema:.2f} state={state}")
+            print(f"  frame={i:4d} p={p:.2f} ema={ema:.2f} state={state} da={da:.2f} dtop={dtop:.2f}")
 
         if args.display:
             col = {'FALL': (0, 0, 255), 'LIED': (0, 165, 255), 'SAFE': (0, 200, 0)}[state]
             label = state
             vis = cv2.cvtColor(cv2.resize(gray128, (384, 384), interpolation=cv2.INTER_NEAREST), cv2.COLOR_GRAY2BGR)
+            if bb is not None:                                   # draw the bbox we measure collapse on
+                s = 384 / gray128.shape[0]
+                cv2.rectangle(vis, (int(bb[0] * s), int(bb[1] * s)), (int(bb[2] * s), int(bb[3] * s)),
+                              (0, 0, 255) if fast_collapse else (255, 200, 0), 1)
             bar = int((ema if p is not None else 0) * 384)
             cv2.rectangle(vis, (0, 378), (bar, 384), col, -1)
             cv2.putText(vis, label, (12, 44), cv2.FONT_HERSHEY_SIMPLEX, 1.4, col, 3)
+            cv2.putText(vis, f"da={da:.2f} dtop={dtop:.2f}{'  COLLAPSE' if fast_collapse else ''}",
+                        (12, 356), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
             cv2.putText(vis, f"p={ema:.2f}  w/h={med_wh:.2f} (LIED>={args.lie_aspect})",
                         (12, 372), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             cv2.imshow('lepton-fall', vis)
