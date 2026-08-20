@@ -47,6 +47,39 @@ def sweep(score, name):
         if f1 > best[0]: best = (f1, t, pr, rc)
     print(f"\n[{name}] AP={ap:.3f}  bestF1={best[0]:.3f} @thr={best[1]:.2f}  P={best[2]:.3f} R={best[3]:.3f}")
 
+def sweep_recall_first(score, name, beta=2.0):
+    """RECALL-FIRST operating point: a missed fall is far worse than a false alarm
+    (caregiver re-checks a false alarm; a missed fall is dangerous).
+    Reports (1) the HIGHEST threshold that still catches EVERY fall on VAL -> the safest
+    zero-miss point with the fewest false alarms, and (2) the best F-beta (recall weighted
+    beta x). Lower threshold = higher recall, so the zero-miss point sits at a low thr."""
+    thrs = np.linspace(0.05, 0.95, 91)
+    rows = []
+    for t in thrs:
+        pred = (score >= t).astype(int)
+        pr, rc, _, _ = precision_recall_fscore_support(y, pred, average='binary', zero_division=0)
+        fb = (1 + beta**2) * pr * rc / max(beta**2 * pr + rc, 1e-9)
+        rows.append((t, pr, rc, fb))
+    print(f"\n[{name}] RECALL-FIRST (missed fall >> false alarm)")
+    zero_miss = [r for r in rows if r[2] >= 0.999]
+    if zero_miss:
+        t, pr, rc, _ = max(zero_miss, key=lambda r: r[0])   # highest thr that still misses nothing
+        print(f"  zero-miss point:  --thr {t:.2f}  ->  catches ALL falls (R=1.00), "
+              f"P={pr:.2f}  ({1-pr:.0%} of alerts are false = caregiver re-checks)")
+    else:
+        print("  !! no threshold reaches R=1.00 on VAL -> the MODEL itself misses some falls; "
+              "lower thr won't help. Enable --collapse-trigger as a second net and/or retrain.")
+    t, pr, rc, fb = max(rows, key=lambda r: r[3])
+    print(f"  best F{beta:.0f} (recall-weighted): --thr {t:.2f}  P={pr:.2f} R={rc:.2f}")
+    print("  --- full curve (pick your own comfort level) ---")
+    print("   thr :  P  /  R   (missed falls)")
+    for t in np.linspace(0.20, 0.70, 11):
+        pred = (score >= t).astype(int)
+        pr, rc, _, _ = precision_recall_fscore_support(y, pred, average='binary', zero_division=0)
+        missed = int(((y == 1) & (pred == 0)).sum())
+        print(f"  {t:.2f} : {pr:.2f} / {rc:.2f}   ({missed} missed)")
+
 print("\n===== VAL streaming eval (n=%d, pos=%d) =====" % (len(y), int(y.sum())))
 sweep(maxp,  "max-window-prob (matches training)")
 sweep(maxema, "max-EMA (streaming/deployment rule)")
+sweep_recall_first(maxema, "max-EMA (deployment)")
