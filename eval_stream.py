@@ -6,7 +6,7 @@ also reports the raw max-window-prob metric for comparison.
 import os, numpy as np, torch, torchvision, torch.nn as nn
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (average_precision_score, precision_recall_fscore_support,
-                             roc_auc_score, confusion_matrix)
+                             roc_auc_score, confusion_matrix, roc_curve, precision_recall_curve)
 from dataset import make_window_feat, load_manifest
 HERE  = os.path.dirname(os.path.abspath(__file__))
 CACHE = os.path.join(HERE, "cache")
@@ -123,14 +123,50 @@ def report_metrics(score, name, thr):
     print(f"  Recall,Precision,Specificity,F1,F2,AUROC,AP,MissedFalls")
     print(f"  {recall:.3f},{precision:.3f},{specificity:.3f},{f1:.3f},{f2:.3f},{auroc:.3f},{ap:.3f},{fn}")
 
+def save_curves(score, name, thr_mark=None, out_dir=os.path.join(HERE, 'runs')):
+    """Save ROC + PR curves as one PNG for the report. The chosen operating point (thr_mark)
+    is drawn as a red dot on both. Skips gracefully if matplotlib isn't installed."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')                 # headless: no display needed
+        import matplotlib.pyplot as plt
+    except Exception as e:
+        print(f"[curves] matplotlib not available ({e}) - skipping PNG (pip install matplotlib)")
+        return
+    fpr, tpr, _ = roc_curve(y, score)
+    prec, rec, _ = precision_recall_curve(y, score)
+    auroc = roc_auc_score(y, score); ap = average_precision_score(y, score)
+    fig, ax = plt.subplots(1, 2, figsize=(10, 4.5))
+    ax[0].plot(fpr, tpr, lw=2, label=f'AUROC={auroc:.3f}')
+    ax[0].plot([0, 1], [0, 1], '--', color='gray', lw=1)
+    ax[0].set(xlabel='False Positive Rate', ylabel='True Positive Rate (Recall)',
+              title=f'ROC - {name}', xlim=(0, 1), ylim=(0, 1.02))
+    base = float(y.mean())
+    ax[1].plot(rec, prec, lw=2, label=f'AP={ap:.3f}')
+    ax[1].axhline(base, ls='--', color='gray', lw=1, label=f'baseline={base:.2f}')
+    ax[1].set(xlabel='Recall', ylabel='Precision', title=f'PR - {name}', xlim=(0, 1), ylim=(0, 1.02))
+    if thr_mark is not None:                  # mark the deployment operating point
+        pred = (score >= thr_mark).astype(int)
+        tp = ((y == 1) & (pred == 1)).sum(); fp = ((y == 0) & (pred == 1)).sum()
+        fn = ((y == 1) & (pred == 0)).sum(); tn = ((y == 0) & (pred == 0)).sum()
+        op_tpr = tp / max(tp + fn, 1); op_fpr = fp / max(fp + tn, 1); op_prec = tp / max(tp + fp, 1)
+        ax[0].scatter([op_fpr], [op_tpr], color='red', zorder=5, label=f'op thr={thr_mark:.2f}')
+        ax[1].scatter([op_tpr], [op_prec], color='red', zorder=5, label=f'op thr={thr_mark:.2f}')
+    ax[0].legend(loc='lower right'); ax[1].legend(loc='lower left')
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, 'roc_pr.png')
+    fig.tight_layout(); fig.savefig(path, dpi=150); plt.close(fig)
+    print(f"[curves] saved -> {path}")
+
 print("\n===== VAL streaming eval (n=%d, pos=%d) =====" % (len(y), int(y.sum())))
 sweep(maxp,  "max-window-prob (matches training)")
 sweep(maxema, "max-EMA (streaming/deployment rule)")
 sweep_recall_first(maxema, "max-EMA (deployment)")
 
-# report block at the deployment operating point: zero-miss if reachable, else best-F2
-zt = zero_miss_thr(maxema)
-if zt is not None:
-    report_metrics(maxema, "max-EMA @ zero-miss (recall-first)", zt)
-else:
-    report_metrics(maxema, "max-EMA @ best-F2 (no zero-miss point on VAL)", best_fbeta_thr(maxema))
+# report block + curves at the deployment operating point: zero-miss if reachable, else best-F2
+op_thr = zero_miss_thr(maxema)
+op_name = "max-EMA @ zero-miss (recall-first)"
+if op_thr is None:
+    op_thr, op_name = best_fbeta_thr(maxema), "max-EMA @ best-F2 (no zero-miss point on VAL)"
+report_metrics(maxema, op_name, op_thr)
+save_curves(maxema, "max-EMA", op_thr)
