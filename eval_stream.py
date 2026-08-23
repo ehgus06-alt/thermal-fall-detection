@@ -5,7 +5,8 @@ also reports the raw max-window-prob metric for comparison.
 """
 import os, numpy as np, torch, torchvision, torch.nn as nn
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import average_precision_score, precision_recall_fscore_support
+from sklearn.metrics import (average_precision_score, precision_recall_fscore_support,
+                             roc_auc_score, confusion_matrix)
 from dataset import make_window_feat, load_manifest
 HERE  = os.path.dirname(os.path.abspath(__file__))
 CACHE = os.path.join(HERE, "cache")
@@ -79,7 +80,57 @@ def sweep_recall_first(score, name, beta=2.0):
         missed = int(((y == 1) & (pred == 0)).sum())
         print(f"  {t:.2f} : {pr:.2f} / {rc:.2f}   ({missed} missed)")
 
+def zero_miss_thr(score):
+    """Highest threshold that still catches EVERY fall (recall=1.0), or None if unreachable."""
+    best = None
+    for t in np.linspace(0.05, 0.95, 91):
+        if (score[y == 1] >= t).mean() >= 0.999:   # recall on the fall clips only
+            best = t
+    return best
+
+def best_fbeta_thr(score, beta=2.0):
+    """Threshold maximizing F-beta (beta>1 favors recall)."""
+    best = (0.0, 0.5)
+    for t in np.linspace(0.05, 0.95, 91):
+        pr, rc, _, _ = precision_recall_fscore_support(y, (score >= t).astype(int),
+                                                       average='binary', zero_division=0)
+        fb = (1 + beta**2) * pr * rc / max(beta**2 * pr + rc, 1e-9)
+        if fb > best[0]: best = (fb, t)
+    return best[1]
+
+def report_metrics(score, name, thr):
+    """Report-ready block at ONE operating threshold: confusion matrix + every derived rate,
+    plus a copy-paste CSV row for the report table."""
+    pred = (score >= thr).astype(int)
+    tn, fp, fn, tp = confusion_matrix(y, pred, labels=[0, 1]).ravel()
+    recall      = tp / max(tp + fn, 1)     # sensitivity - the safety-critical metric
+    precision   = tp / max(tp + fp, 1)
+    specificity = tn / max(tn + fp, 1)
+    far         = fp / max(fp + tn, 1)     # false-alarm rate
+    f1 = 2 * precision * recall / max(precision + recall, 1e-9)
+    f2 = 5 * precision * recall / max(4 * precision + recall, 1e-9)
+    auroc = roc_auc_score(y, score) if len(set(y.tolist())) > 1 else float('nan')
+    ap    = average_precision_score(y, score)
+    print(f"\n========== REPORT METRICS [{name}] @thr={thr:.2f} ==========")
+    print(f"  confusion matrix     TP={tp}  FP={fp}  FN={fn}  TN={tn}   (N={len(y)}, falls={int(y.sum())})")
+    print(f"  Recall / Sensitivity {recall:.3f}   <- missed falls: {fn}")
+    print(f"  Precision            {precision:.3f}")
+    print(f"  Specificity          {specificity:.3f}")
+    print(f"  False-alarm rate     {far:.3f}")
+    print(f"  F1 / F2              {f1:.3f} / {f2:.3f}   (F2 weights recall 2x)")
+    print(f"  AUROC / AP(AUPRC)    {auroc:.3f} / {ap:.3f}   (threshold-independent)")
+    print(f"  --- copy-paste CSV row ---")
+    print(f"  Recall,Precision,Specificity,F1,F2,AUROC,AP,MissedFalls")
+    print(f"  {recall:.3f},{precision:.3f},{specificity:.3f},{f1:.3f},{f2:.3f},{auroc:.3f},{ap:.3f},{fn}")
+
 print("\n===== VAL streaming eval (n=%d, pos=%d) =====" % (len(y), int(y.sum())))
 sweep(maxp,  "max-window-prob (matches training)")
 sweep(maxema, "max-EMA (streaming/deployment rule)")
 sweep_recall_first(maxema, "max-EMA (deployment)")
+
+# report block at the deployment operating point: zero-miss if reachable, else best-F2
+zt = zero_miss_thr(maxema)
+if zt is not None:
+    report_metrics(maxema, "max-EMA @ zero-miss (recall-first)", zt)
+else:
+    report_metrics(maxema, "max-EMA @ best-F2 (no zero-miss point on VAL)", best_fbeta_thr(maxema))
