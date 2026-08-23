@@ -107,17 +107,21 @@ def camera_source(idx, y16):
     cap.release()
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  백엔드로 보낼 JSON 형식: 나중에 형식이 정해지면 여기 dict 만 바꾸면 됩니다.
-#  아래는 자리표시용(placeholder) 기본 형식 — 필드 추가/이름 변경 자유롭게.
-def build_fall_payload(*, device_id, now, frame_idx, held_seconds, probability):
+#  백엔드로 보낼 JSON. state -> event_type 매핑: SAFE/LIED = 정상, FALL = 낙상.
+#  (WARNING 은 현재 미사용 — LIED 를 WARNING 으로 올리려면 아래 매핑만 바꾸면 됨)
+STATE_EVENT = {'SAFE': 'NORMAL', 'LIED': 'NORMAL', 'FALL': 'FALL_DETECTED'}
+
+def build_payload(*, device_id, now, event_type, confidence, height_drop, posture):
     return {
-        "event":        "fall",
-        "device_id":    device_id,
-        "timestamp":    time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(now)),
-        "unix_time":    round(now, 3),
-        "held_seconds": held_seconds,
-        "probability":  round(probability, 3),
-        "frame":        int(frame_idx),
+        "device_id":        device_id,
+        "timestamp":        time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(now)),  # ISO8601 UTC
+        "event_type":       event_type,                    # NORMAL | WARNING | FALL_DETECTED
+        "confidence_score": round(float(confidence), 3),   # AI 확신도 0.0 ~ 1.0
+        "sensor_summary": {                                # 부가정보 (대시보드 표시용)
+            "height_drop":     bool(height_drop),          # 급격한 고도 하락 (descent/dtop 기반)
+            "heavy_vibration": False,                      # TODO: 가속도센서 연결 시 채우기 (현재 센서 없음)
+            "posture":         posture,                    # "horizontal" | "vertical"
+        },
     }
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -189,6 +193,15 @@ def collapse_metrics(bbox_hist, height, lookback):
     dtop = (win[-1][2] - win[0][2]) / max(height, 1)
     return max(da, 0.0), max(dtop, 0.0)
 
+def count_person_blobs(gray, pct=92, min_pixels=60):
+    """How many distinct warm blobs (people) are >= min_pixels. With 2+ people the single-blob
+    geometry (bbox aspect / collapse) is meaningless, so the caller suppresses FALL alerts and
+    only tracks. Thermal blobs are noisy (limbs split, pets/radiators show up), so the caller
+    debounces this count over ~1s before acting on it."""
+    m = (gray >= np.percentile(gray, pct)).astype(np.uint8)
+    num, _, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+    return int(sum(1 for k in range(1, num) if stats[k, cv2.CC_STAT_AREA] >= min_pixels))
+
 def simclip_source(clip):
     cls, name = clip.split('/')
     stack = np.load(os.path.join(CACHE, cls, name + '.npy'))   # already 128 gray
@@ -212,9 +225,14 @@ def main():
     ap.add_argument('--display', action='store_true', help='show HUD window (FALL / LIED / SAFE)')
     ap.add_argument('--lie-aspect', type=float, default=1.4,
                     help='blob width/height above this = LIED (lying) state shown in orange. Tune to your camera using the w/h shown on the HUD.')
-    ap.add_argument('--webhook', default=WEBHOOK_URL, help='backend URL for the sustained-fall JSON (default = WEBHOOK_URL at top of file)')
-    ap.add_argument('--fall-hold', type=float, default=3.0, help='seconds a FALL must stay held before the backend signal is sent')
-    ap.add_argument('--device-id', default='lepton-01', help='device id included in webhook payload')
+    ap.add_argument('--webhook', default=WEBHOOK_URL, help='backend URL for status JSON (heartbeat + events). default = WEBHOOK_URL at top of file')
+    ap.add_argument('--device-id', default='pi_node_01', help='device id included in every backend payload')
+    ap.add_argument('--heartbeat', type=float, default=5.0,
+                    help='seconds between keep-alive heartbeats to the backend (current status; proves the link is alive)')
+    ap.add_argument('--state-hold', type=float, default=2.0,
+                    help='a state must persist this many seconds before its event is sent (debounces spikes from sudden movement)')
+    ap.add_argument('--person-min-pixels', type=int, default=60,
+                    help='min warm-blob size (px) counted as a person; 2+ people -> geometry unreliable -> FALL alerts suppressed (tracking only)')
     ap.add_argument('--collapse-lookback', type=float, default=0.6,
                     help='seconds of bbox history used to measure how fast the person box flattens')
     ap.add_argument('--collapse-aspect', type=float, default=0.8,
@@ -237,10 +255,15 @@ def main():
     src = simclip_source(args.simclip) if sim else camera_source(args.camera, args.y16)
     last_alarm = -1e9; n = 0; t0 = time.time(); fired_any = False; over = 0
     fall_latched = False; upright_count = 0    # FALL stays latched until person stands up again
-    fall_start = 0.0; webhook_sent = False; fall_prob = 0.0   # sustained-fall backend signal
     cy_hist = collections.deque(maxlen=15)     # blob centroid history for descent gate
     aspect_hist = collections.deque(maxlen=8)  # blob w/h history for LIED posture state
     bbox_hist = collections.deque(maxlen=30)   # (t, aspect, top_y) history for bbox collapse-speed
+    people_hist = collections.deque(maxlen=15) # warm-blob count history (~1s) to debounce multi-person
+    # backend sender state: 5s heartbeat + immediate send whenever the debounced event changes
+    pending_event = 'NORMAL'; pending_since = t0; confirmed_event = 'NORMAL'
+    last_reported = None; last_send = 0.0
+    print(f"backend={args.webhook or '(none: pass --webhook)'}  "
+          f"heartbeat={args.heartbeat}s  state-hold={args.state_hold}s")
     for i, frame in enumerate(src):
         gray128 = frame if sim else prep_gray128(frame_to_gray(frame, args.y16))
         if i % args.stride:
@@ -256,6 +279,8 @@ def main():
             bbox_hist.append((now, bbox_aspect(bb), bb[1]))
         da, dtop = collapse_metrics(bbox_hist, gray128.shape[0], args.collapse_lookback)
         fast_collapse = da >= args.collapse_aspect or dtop >= args.collapse_drop
+        people_hist.append(count_person_blobs(gray128, min_pixels=args.person_min_pixels))
+        multi_person = int(np.median(people_hist)) >= 2   # debounced: 2+ people -> suppress FALL alerts
         over = over + 1 if (p is not None and ema >= args.thr) else 0
         # two independent FALL triggers, both respecting the cooldown:
         #   model_alarm    = CNN motion window says fall (+ optional descent gate)
@@ -274,8 +299,6 @@ def main():
         med_wh = float(np.median(aspect_hist)) if aspect_hist else 0.0
         lying = med_wh >= args.lie_aspect
         if alarm:
-            if not fall_latched:                  # entering FALL: start the hold timer
-                fall_start = now; webhook_sent = False; fall_prob = float(ema)
             fall_latched = True; upright_count = 0
         elif not lying:
             upright_count += 1
@@ -285,16 +308,27 @@ def main():
             upright_count = 0
         state = 'FALL' if fall_latched else ('LIED' if lying else 'SAFE')
 
-        # backend signal: only when the FALL has been HELD for --fall-hold seconds (fell & still down)
-        if fall_latched and not webhook_sent and (now - fall_start) >= args.fall_hold:
-            webhook_sent = True
-            held = round(now - fall_start, 1)
-            print(f"  >>> FALL held {held}s -> backend signal {'sent' if args.webhook else '(no URL set)'}")
+        # ---- backend sender: 5s heartbeat + immediate send on a debounced state change ----
+        # A state must persist --state-hold seconds to be 'confirmed', so spikes from sudden
+        # movement never reach the backend. With 2+ people the geometry is unreliable, so FALL is
+        # masked to NORMAL: the heartbeat keeps proving the link is alive but no false alert goes out.
+        inst_event = STATE_EVENT[state]
+        if inst_event != pending_event:
+            pending_event = inst_event; pending_since = now
+        if pending_event != confirmed_event and (now - pending_since) >= args.state_hold:
+            confirmed_event = pending_event
+        report_event = 'NORMAL' if (multi_person and confirmed_event == 'FALL_DETECTED') else confirmed_event
+        changed = report_event != last_reported
+        if changed or (now - last_send) >= args.heartbeat:
+            if changed:
+                tag = ' [multi-person: FALL suppressed]' if (multi_person and confirmed_event == 'FALL_DETECTED') else ''
+                print(f"  >>> event -> {report_event}{tag}  (backend {'sent' if args.webhook else 'skipped: no URL'})")
             if args.webhook:
-                payload = build_fall_payload(
-                    device_id=args.device_id, now=now, frame_idx=i,
-                    held_seconds=held, probability=fall_prob)
-                post_json(args.webhook, payload)
+                post_json(args.webhook, build_payload(
+                    device_id=args.device_id, now=now, event_type=report_event, confidence=ema,
+                    height_drop=max(descent, dtop) >= args.collapse_drop,
+                    posture='horizontal' if lying else 'vertical'))
+            last_reported = report_event; last_send = now
 
         if alarm:
             last_alarm = now; fired_any = True
@@ -305,7 +339,7 @@ def main():
             snap = os.path.join(snap_dir, f"fall_{time.strftime('%Y%m%d_%H%M%S')}_{i}.png")
             Image.fromarray(gray128).resize((320, 320), Image.NEAREST).save(snap)
             print(f"  [{ts}] >>> FALL detected <<<  frame={i} p={pstr} ema={ema:.2f} via={trig} "
-                  f"da={da:.2f} dtop={dtop:.2f}  (hold {args.fall_hold}s for backend signal)")
+                  f"da={da:.2f} dtop={dtop:.2f}  (needs {args.state_hold}s hold to alert backend)")
         elif p is not None and (ema > 0.3 or p > 0.5):
             print(f"  frame={i:4d} p={p:.2f} ema={ema:.2f} state={state} da={da:.2f} dtop={dtop:.2f}")
 
@@ -320,6 +354,8 @@ def main():
             bar = int((ema if p is not None else 0) * 384)
             cv2.rectangle(vis, (0, 378), (bar, 384), col, -1)
             cv2.putText(vis, label, (12, 44), cv2.FONT_HERSHEY_SIMPLEX, 1.4, col, 3)
+            cv2.putText(vis, f"people={int(np.median(people_hist))}{'  MULTI: FALL alerts OFF' if multi_person else ''}",
+                        (12, 340), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255) if multi_person else (255, 255, 255), 1)
             cv2.putText(vis, f"da={da:.2f} dtop={dtop:.2f}{'  COLLAPSE' if fast_collapse else ''}",
                         (12, 356), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
             cv2.putText(vis, f"p={ema:.2f}  w/h={med_wh:.2f} (LIED>={args.lie_aspect})",
