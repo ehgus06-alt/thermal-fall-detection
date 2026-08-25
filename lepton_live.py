@@ -295,6 +295,10 @@ def main():
     ap.add_argument('--display', action='store_true', help='show HUD window (FALL / LIED / SAFE)')
     ap.add_argument('--lie-aspect', type=float, default=1.4,
                     help='blob width/height above this = LIED (lying) state shown in orange. Tune to your camera using the w/h shown on the HUD.')
+    ap.add_argument('--lie-hyst', type=float, default=0.3,
+                    help='lying hysteresis: once down, stay down until w/h drops below (lie-aspect - this). Stops FALL/LIED flicker near the threshold.')
+    ap.add_argument('--fall-min-hold', type=float, default=5.0,
+                    help='seconds a FALL is held after it fires before it can clear (ignores flicker; clears only on sustained standing after this).')
     ap.add_argument('--webhook', default=WEBHOOK_URL, help='backend URL for status JSON (heartbeat + events). default = WEBHOOK_URL at top of file')
     ap.add_argument('--device-id', default='pi_node_01', help='device id included in every backend payload')
     ap.add_argument('--send-retries', type=int, default=3,
@@ -348,7 +352,7 @@ def main():
     sim = args.simclip is not None
     src = simclip_source(args.simclip) if sim else camera_source(args.camera, args.y16, args.reconnect_wait)
     last_alarm = -1e9; n = 0; t0 = time.time(); fired_any = False; over = 0
-    fall_latched = False; upright_count = 0    # FALL stays latched until person stands up again
+    fall_latched = False; upright_count = 0; fall_start = 0.0; lying = False   # FALL latch + hysteresis state
     cy_hist = collections.deque(maxlen=15)     # blob centroid history for descent gate
     aspect_hist = collections.deque(maxlen=8)  # blob w/h history for LIED posture state
     bbox_hist = collections.deque(maxlen=30)   # (t, aspect, top_y) history for bbox collapse-speed
@@ -398,9 +402,20 @@ def main():
             if wh is not None:
                 aspect_hist.append(wh)
             med_wh = float(np.median(aspect_hist)) if aspect_hist else 0.0
-            lying = med_wh >= args.lie_aspect
+            # 'lying' with hysteresis: enter at --lie-aspect, stay down until it drops below
+            # (--lie-aspect - --lie-hyst). Stops aspect jitter near the threshold from toggling.
+            if not lying and med_wh >= args.lie_aspect:
+                lying = True
+            elif lying and med_wh < args.lie_aspect - args.lie_hyst:
+                lying = False
+            # FALL latch with a minimum hold: once a fall fires, hold FALL for --fall-min-hold seconds
+            # (ignoring flicker), then clear only after sustained upright. Kills FALL<->LIED oscillation.
             if alarm:
+                if not fall_latched:
+                    fall_start = now
                 fall_latched = True; upright_count = 0
+            elif fall_latched and (now - fall_start) < args.fall_min_hold:
+                upright_count = 0                     # inside min-hold: stay FALL no matter what
             elif not lying:
                 upright_count += 1
                 if upright_count >= 8:                # sustained upright -> person got back up
