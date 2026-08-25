@@ -76,8 +76,8 @@ def camera_backends():
         return [(cv2.CAP_MSMF, 'MSMF'), (cv2.CAP_DSHOW, 'DSHOW'), (cv2.CAP_ANY, 'ANY')]
     return [(cv2.CAP_V4L2, 'V4L2'), (cv2.CAP_ANY, 'ANY')]
 
-def camera_source(idx, y16):
-    cap = None
+def open_camera(idx, y16):
+    """Try each backend and return an opened VideoCapture (verified with one test frame), or None."""
     for be, name in camera_backends():
         c = cv2.VideoCapture(int(idx), be)
         if y16:
@@ -94,16 +94,38 @@ def camera_source(idx, y16):
             time.sleep(0.05)
         if ok and fr is not None:
             print(f"camera opened via {name}, frame={fr.shape}")
-            cap = c; break
+            return c
         c.release()
-    if cap is None:
-        raise RuntimeError(f"cannot pull frames from camera {idx}. "
-                           f"Close the FLIR Lepton app (one app at a time), then retry. "
-                           f"Diagnose with: python list_cameras.py")
+    return None
+
+def camera_source(idx, y16, reconnect_wait=3.0, tick=0.5):
+    """Never-dying camera generator. Yields a frame when the Lepton is healthy, or None when it's
+    down - so the caller keeps running and heartbeats thermal=FAIL to the backend. Reconnects on its
+    own: a missing or dead camera no longer crashes or silently stops the monitor. Runs until Ctrl-C."""
+    cap = None; last_try = 0.0; down_announced = False
     while True:
+        if cap is None:
+            if time.time() - last_try >= reconnect_wait:
+                last_try = time.time()
+                cap = open_camera(idx, y16)
+                if cap is not None:
+                    print(f"camera {idx} UP")
+                    down_announced = False
+            if cap is None:
+                if not down_announced:
+                    print(f"camera {idx} DOWN -> thermal=FAIL heartbeats; retrying every {reconnect_wait:.0f}s "
+                          f"(close the FLIR Lepton app if it is holding the device)")
+                    down_announced = True
+                yield None                          # camera down: caller sends a FAIL heartbeat
+                time.sleep(tick)
+                continue
         ok, frame = cap.read()
-        if not ok or frame is None:
-            break
+        if not ok or frame is None:                 # mid-run loss -> drop it and reconnect
+            print(f"camera {idx} read failed -> reconnecting")
+            cap.release(); cap = None; last_try = time.time()
+            yield None
+            time.sleep(tick)
+            continue
         yield frame
     cap.release()
 
@@ -223,6 +245,8 @@ def main():
     ap.add_argument('--camera', type=str, default=None)
     ap.add_argument('--simclip', type=str, default=None)
     ap.add_argument('--y16', action='store_true')
+    ap.add_argument('--reconnect-wait', type=float, default=3.0,
+                    help='seconds between camera reconnect attempts while the Lepton is down (thermal=FAIL)')
     ap.add_argument('--thr', type=float, default=0.47)
     ap.add_argument('--ema', type=float, default=0.4)
     ap.add_argument('--stride', type=int, default=1, help='run model every N frames')
@@ -273,7 +297,7 @@ def main():
     print(f"device={device} W={W} thr={args.thr} ema={args.ema}  (Ctrl-C to stop)")
 
     sim = args.simclip is not None
-    src = simclip_source(args.simclip) if sim else camera_source(args.camera, args.y16)
+    src = simclip_source(args.simclip) if sim else camera_source(args.camera, args.y16, args.reconnect_wait)
     last_alarm = -1e9; n = 0; t0 = time.time(); fired_any = False; over = 0
     fall_latched = False; upright_count = 0    # FALL stays latched until person stands up again
     cy_hist = collections.deque(maxlen=15)     # blob centroid history for descent gate
@@ -282,118 +306,133 @@ def main():
     people_hist = collections.deque(maxlen=15) # warm-blob count history (~1s) to debounce multi-person
     # backend sender state: 5s heartbeat + immediate send whenever the debounced event changes
     pending_event = 'SAFE'; pending_since = t0; confirmed_event = 'SAFE'
-    last_reported = None; last_send = 0.0; seq = 0
+    last_reported = None; last_send = 0.0; seq = 0; last_thermal = None
+    state = 'SAFE'; multi_person = False        # frozen values reused while the camera is down
     health = {'vibrator': args.health_vibrator, 'radar': args.health_radar, 'thermal': args.health_thermal}
     print(f"backend={args.webhook or '(none: pass --webhook)'}  "
           f"heartbeat={args.heartbeat}s  state-hold={args.state_hold}s")
-    print(f"sensor_health MOCK: vibrator={health['vibrator']} radar={health['radar']} thermal={health['thermal']}"
+    print(f"sensor_health: vibrator={health['vibrator']}(mock) radar={health['radar']}(mock) "
+          f"thermal=live[OK when frames arrive, FAIL when camera down]"
           f"  | device MOCK: battery={args.battery_pct}% rssi={args.rssi}dBm")
     for i, frame in enumerate(src):
-        gray128 = frame if sim else prep_gray128(frame_to_gray(frame, args.y16))
-        if i % args.stride:
-            continue
-        p, ema = det.push(gray128)
-        n += 1
         now = time.time()
-        cy_hist.append(blob_centroid_y(gray128))
-        descent = recent_descent(cy_hist, gray128.shape[0])
-        # bbox collapse-speed: how fast the warm-blob box flattens (fall) vs eases down (lie-down)
-        bb = person_bbox(gray128)
-        if bb is not None:
-            bbox_hist.append((now, bbox_aspect(bb), bb[1]))
-        da, dtop = collapse_metrics(bbox_hist, gray128.shape[0], args.collapse_lookback)
-        fast_collapse = da >= args.collapse_aspect or dtop >= args.collapse_drop
-        people_hist.append(count_person_blobs(gray128, min_pixels=args.person_min_pixels))
-        multi_person = int(np.median(people_hist)) >= 2   # debounced: 2+ people -> suppress FALL alerts
-        over = over + 1 if (p is not None and ema >= args.thr) else 0
-        # two independent FALL triggers, both respecting the cooldown:
-        #   model_alarm    = CNN motion window says fall (+ optional descent gate)
-        #   collapse_alarm = bbox flattened FAST (fall-like), only when --collapse-trigger is on
-        model_alarm = over >= args.persist and descent >= args.min_descent
-        collapse_alarm = args.collapse_trigger and fast_collapse
-        alarm = (model_alarm or collapse_alarm) and now - last_alarm > args.cooldown
+        thermal_ok = frame is not None           # None = camera down (resilient source keeps us alive)
+        if thermal_ok and (sim or i % args.stride == 0):
+            gray128 = frame if sim else prep_gray128(frame_to_gray(frame, args.y16))
+            p, ema = det.push(gray128)
+            n += 1
+            cy_hist.append(blob_centroid_y(gray128))
+            descent = recent_descent(cy_hist, gray128.shape[0])
+            # bbox collapse-speed: how fast the warm-blob box flattens (fall) vs eases down (lie-down)
+            bb = person_bbox(gray128)
+            if bb is not None:
+                bbox_hist.append((now, bbox_aspect(bb), bb[1]))
+            da, dtop = collapse_metrics(bbox_hist, gray128.shape[0], args.collapse_lookback)
+            fast_collapse = da >= args.collapse_aspect or dtop >= args.collapse_drop
+            people_hist.append(count_person_blobs(gray128, min_pixels=args.person_min_pixels))
+            multi_person = int(np.median(people_hist)) >= 2   # debounced: 2+ people -> suppress FALL alerts
+            over = over + 1 if (p is not None and ema >= args.thr) else 0
+            # two independent FALL triggers, both respecting the cooldown:
+            #   model_alarm    = CNN motion window says fall (+ optional descent gate)
+            #   collapse_alarm = bbox flattened FAST (fall-like), only when --collapse-trigger is on
+            model_alarm = over >= args.persist and descent >= args.min_descent
+            collapse_alarm = args.collapse_trigger and fast_collapse
+            alarm = (model_alarm or collapse_alarm) and now - last_alarm > args.cooldown
 
-        # posture + FALL-latch state machine.
-        # LIED vs FALL is NOT about the pose (both end wide/horizontal) but about HOW you got
-        # there: a fall fires the model -> FALL latched until you stand up again; a slow
-        # lie-down never fires -> LIED. Aspect only tells us "is the person still down".
-        wh = posture_aspect(gray128)
-        if wh is not None:
-            aspect_hist.append(wh)
-        med_wh = float(np.median(aspect_hist)) if aspect_hist else 0.0
-        lying = med_wh >= args.lie_aspect
-        if alarm:
-            fall_latched = True; upright_count = 0
-        elif not lying:
-            upright_count += 1
-            if upright_count >= 8:                # sustained upright -> person got back up
-                fall_latched = False
-        else:
-            upright_count = 0
-        state = 'FALL' if fall_latched else ('LIED' if lying else 'SAFE')
+            # posture + FALL-latch state machine.
+            # LIED vs FALL is NOT about the pose (both end wide/horizontal) but about HOW you got
+            # there: a fall fires the model -> FALL latched until you stand up again; a slow
+            # lie-down never fires -> LIED. Aspect only tells us "is the person still down".
+            wh = posture_aspect(gray128)
+            if wh is not None:
+                aspect_hist.append(wh)
+            med_wh = float(np.median(aspect_hist)) if aspect_hist else 0.0
+            lying = med_wh >= args.lie_aspect
+            if alarm:
+                fall_latched = True; upright_count = 0
+            elif not lying:
+                upright_count += 1
+                if upright_count >= 8:                # sustained upright -> person got back up
+                    fall_latched = False
+            else:
+                upright_count = 0
+            state = 'FALL' if fall_latched else ('LIED' if lying else 'SAFE')
 
-        # ---- backend sender: 5s heartbeat + immediate send on a debounced state change ----
-        # A state must persist --state-hold seconds to be 'confirmed', so spikes from sudden
-        # movement never reach the backend. With 2+ people the geometry is unreliable, so DANGER is
-        # masked to SAFE: the heartbeat keeps proving the link is alive but no false alert goes out.
+            if alarm:
+                last_alarm = now; fired_any = True
+                ts = time.strftime('%H:%M:%S')
+                trig = 'model' if model_alarm else 'collapse'
+                pstr = f"{p:.2f}" if p is not None else "--"
+                # NOTE: cv2.imwrite fails silently on non-ASCII (Korean) paths -> use PIL
+                snap = os.path.join(snap_dir, f"fall_{time.strftime('%Y%m%d_%H%M%S')}_{i}.png")
+                Image.fromarray(gray128).resize((320, 320), Image.NEAREST).save(snap)
+                print(f"  [{ts}] >>> FALL detected <<<  frame={i} p={pstr} ema={ema:.2f} via={trig} "
+                      f"da={da:.2f} dtop={dtop:.2f}  (needs {args.state_hold}s hold to alert backend)")
+            elif p is not None and (ema > 0.3 or p > 0.5):
+                print(f"  frame={i:4d} p={p:.2f} ema={ema:.2f} state={state} da={da:.2f} dtop={dtop:.2f}")
+
+            if args.display:
+                col = {'FALL': (0, 0, 255), 'LIED': (0, 165, 255), 'SAFE': (0, 200, 0)}[state]
+                label = HUD_LABEL[state]                             # e.g. "FALL (DANGER)"
+                vis = cv2.cvtColor(cv2.resize(gray128, (384, 384), interpolation=cv2.INTER_NEAREST), cv2.COLOR_GRAY2BGR)
+                if bb is not None:                                   # draw the bbox we measure collapse on
+                    s = 384 / gray128.shape[0]
+                    cv2.rectangle(vis, (int(bb[0] * s), int(bb[1] * s)), (int(bb[2] * s), int(bb[3] * s)),
+                                  (0, 0, 255) if fast_collapse else (255, 200, 0), 1)
+                bar = int((ema if p is not None else 0) * 384)
+                cv2.rectangle(vis, (0, 378), (bar, 384), col, -1)
+                # auto-fit the label: shrink the font so even "FALL (DANGER)" stays inside the 384px window
+                scale = 1.4
+                (tw, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, scale, 3)
+                if tw > 384 - 24:
+                    scale *= (384 - 24) / tw
+                cv2.putText(vis, label, (12, 46), cv2.FONT_HERSHEY_SIMPLEX, scale, col, max(2, round(scale * 2)))
+                cv2.putText(vis, f"people={int(np.median(people_hist))}{'  MULTI: FALL alerts OFF' if multi_person else ''}",
+                            (12, 340), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255) if multi_person else (255, 255, 255), 1)
+                cv2.putText(vis, f"da={da:.2f} dtop={dtop:.2f}{'  COLLAPSE' if fast_collapse else ''}",
+                            (12, 356), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                cv2.putText(vis, f"p={ema:.2f}  w/h={med_wh:.2f} (LIED>={args.lie_aspect})",
+                            (12, 372), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                cv2.imshow('lepton-fall', vis)
+                if cv2.waitKey(20 if sim else 1) & 0xFF == ord('q'):
+                    break
+
+        # ---- backend sender: runs EVERY tick so a camera outage still heartbeats thermal=FAIL ----
+        # 5s heartbeat + immediate send when the debounced person-state changes (EVENT) or when the
+        # thermal health flips (immediate HEARTBEAT). During an outage `state` is frozen at its last
+        # known value and multi-person is unknown, so DANGER is not newly manufactured or suppressed.
+        health['thermal'] = args.health_thermal if thermal_ok else 'FAIL'
+        if not thermal_ok:
+            multi_person = False
+            if args.display:                        # camera-down splash so the window is not stale
+                down = np.zeros((384, 384, 3), np.uint8)
+                cv2.putText(down, "THERMAL FAIL", (34, 196), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 0, 255), 3)
+                cv2.putText(down, "camera down - reconnecting", (40, 236), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+                cv2.imshow('lepton-fall', down)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
         inst_event = STATE_EVENT[state]
         if inst_event != pending_event:
             pending_event = inst_event; pending_since = now
         if pending_event != confirmed_event and (now - pending_since) >= args.state_hold:
             confirmed_event = pending_event
         report_event = 'SAFE' if (multi_person and confirmed_event == 'DANGER') else confirmed_event
-        changed = report_event != last_reported
-        if changed or (now - last_send) >= args.heartbeat:
-            report_type = 'EVENT' if changed else 'HEARTBEAT'
-            if changed:
+        event_changed = report_event != last_reported
+        health_changed = health['thermal'] != last_thermal
+        if event_changed or health_changed or (now - last_send) >= args.heartbeat:
+            report_type = 'EVENT' if event_changed else 'HEARTBEAT'   # sensor-health change stays a heartbeat
+            if event_changed:
                 tag = ' [multi-person: DANGER suppressed]' if (multi_person and confirmed_event == 'DANGER') else ''
                 print(f"  >>> EVENT -> {report_event}{tag}  (backend {'sent' if args.webhook else 'skipped: no URL'})")
+            elif health_changed:
+                print(f"  >>> thermal={health['thermal']}  (heartbeat, backend {'sent' if args.webhook else 'skipped: no URL'})")
             if args.webhook:
                 post_json(args.webhook, build_payload(
                     device_id=args.device_id, seq=seq, now=now,
                     report_type=report_type, event_type=report_event, sensor_health=health,
                     battery_pct=args.battery_pct, rssi=args.rssi, uptime_sec=now - t0))
                 seq += 1
-            last_reported = report_event; last_send = now
-
-        if alarm:
-            last_alarm = now; fired_any = True
-            ts = time.strftime('%H:%M:%S')
-            trig = 'model' if model_alarm else 'collapse'
-            pstr = f"{p:.2f}" if p is not None else "--"
-            # NOTE: cv2.imwrite fails silently on non-ASCII (Korean) paths -> use PIL
-            snap = os.path.join(snap_dir, f"fall_{time.strftime('%Y%m%d_%H%M%S')}_{i}.png")
-            Image.fromarray(gray128).resize((320, 320), Image.NEAREST).save(snap)
-            print(f"  [{ts}] >>> FALL detected <<<  frame={i} p={pstr} ema={ema:.2f} via={trig} "
-                  f"da={da:.2f} dtop={dtop:.2f}  (needs {args.state_hold}s hold to alert backend)")
-        elif p is not None and (ema > 0.3 or p > 0.5):
-            print(f"  frame={i:4d} p={p:.2f} ema={ema:.2f} state={state} da={da:.2f} dtop={dtop:.2f}")
-
-        if args.display:
-            col = {'FALL': (0, 0, 255), 'LIED': (0, 165, 255), 'SAFE': (0, 200, 0)}[state]
-            label = HUD_LABEL[state]                             # e.g. "FALL (DANGER)"
-            vis = cv2.cvtColor(cv2.resize(gray128, (384, 384), interpolation=cv2.INTER_NEAREST), cv2.COLOR_GRAY2BGR)
-            if bb is not None:                                   # draw the bbox we measure collapse on
-                s = 384 / gray128.shape[0]
-                cv2.rectangle(vis, (int(bb[0] * s), int(bb[1] * s)), (int(bb[2] * s), int(bb[3] * s)),
-                              (0, 0, 255) if fast_collapse else (255, 200, 0), 1)
-            bar = int((ema if p is not None else 0) * 384)
-            cv2.rectangle(vis, (0, 378), (bar, 384), col, -1)
-            # auto-fit the label: shrink the font so even "FALL (DANGER)" stays inside the 384px window
-            scale = 1.4
-            (tw, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, scale, 3)
-            if tw > 384 - 24:
-                scale *= (384 - 24) / tw
-            cv2.putText(vis, label, (12, 46), cv2.FONT_HERSHEY_SIMPLEX, scale, col, max(2, round(scale * 2)))
-            cv2.putText(vis, f"people={int(np.median(people_hist))}{'  MULTI: FALL alerts OFF' if multi_person else ''}",
-                        (12, 340), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255) if multi_person else (255, 255, 255), 1)
-            cv2.putText(vis, f"da={da:.2f} dtop={dtop:.2f}{'  COLLAPSE' if fast_collapse else ''}",
-                        (12, 356), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-            cv2.putText(vis, f"p={ema:.2f}  w/h={med_wh:.2f} (LIED>={args.lie_aspect})",
-                        (12, 372), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            cv2.imshow('lepton-fall', vis)
-            if cv2.waitKey(20 if sim else 1) & 0xFF == ord('q'):
-                break
+            last_reported = report_event; last_send = now; last_thermal = health['thermal']
     fps = n / max(time.time() - t0, 1e-6)
     print(f"processed {n} windows @ {fps:.1f} win/s. result: "
           f"{'FALL detected' if fired_any else 'no fall'}")
