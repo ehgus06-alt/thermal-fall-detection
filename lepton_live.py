@@ -111,6 +111,8 @@ def camera_source(idx, y16):
 #  백엔드로 보낼 JSON (백엔드 확정 스키마).
 #  state -> event_type 매핑: SAFE=안전, LIED(누움)=WARNING, FALL(낙상)=DANGER.
 STATE_EVENT = {'SAFE': 'SAFE', 'LIED': 'WARNING', 'FALL': 'DANGER'}
+# HUD 라벨: 상태 + 백엔드 심각도 병기
+HUD_LABEL = {'SAFE': 'SAFE', 'LIED': 'LIED (WARNING)', 'FALL': 'FALL (DANGER)'}
 
 def build_payload(*, device_id, seq, now, report_type, event_type, sensor_health,
                   battery_pct, rssi, uptime_sec):
@@ -369,7 +371,7 @@ def main():
 
         if args.display:
             col = {'FALL': (0, 0, 255), 'LIED': (0, 165, 255), 'SAFE': (0, 200, 0)}[state]
-            label = state
+            label = HUD_LABEL[state]                             # e.g. "FALL (DANGER)"
             vis = cv2.cvtColor(cv2.resize(gray128, (384, 384), interpolation=cv2.INTER_NEAREST), cv2.COLOR_GRAY2BGR)
             if bb is not None:                                   # draw the bbox we measure collapse on
                 s = 384 / gray128.shape[0]
@@ -377,7 +379,12 @@ def main():
                               (0, 0, 255) if fast_collapse else (255, 200, 0), 1)
             bar = int((ema if p is not None else 0) * 384)
             cv2.rectangle(vis, (0, 378), (bar, 384), col, -1)
-            cv2.putText(vis, label, (12, 44), cv2.FONT_HERSHEY_SIMPLEX, 1.4, col, 3)
+            # auto-fit the label: shrink the font so even "FALL (DANGER)" stays inside the 384px window
+            scale = 1.4
+            (tw, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, scale, 3)
+            if tw > 384 - 24:
+                scale *= (384 - 24) / tw
+            cv2.putText(vis, label, (12, 46), cv2.FONT_HERSHEY_SIMPLEX, scale, col, max(2, round(scale * 2)))
             cv2.putText(vis, f"people={int(np.median(people_hist))}{'  MULTI: FALL alerts OFF' if multi_person else ''}",
                         (12, 340), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255) if multi_person else (255, 255, 255), 1)
             cv2.putText(vis, f"da={da:.2f} dtop={dtop:.2f}{'  COLLAPSE' if fast_collapse else ''}",
