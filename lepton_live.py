@@ -297,7 +297,12 @@ def main():
     ap.add_argument('--state-hold', type=float, default=2.0,
                     help='a state must persist this many seconds before its event is sent (debounces spikes from sudden movement)')
     ap.add_argument('--person-min-pixels', type=int, default=60,
-                    help='min warm-blob size (px) counted as a person; 2+ people -> geometry unreliable -> FALL alerts suppressed (tracking only)')
+                    help='min warm-blob size (px) counted as a person (used only when --multi-suppress is on)')
+    ap.add_argument('--multi-suppress', action='store_true',
+                    help='OFF by default. When on, suppress DANGER while 2+ warm blobs are seen (geometry '
+                         'unreliable with multiple people). Leave OFF for a single occupant: thermal blobs '
+                         'split a lone person (bare skin vs cool clothes) into several, which would mask a '
+                         'real fall. Only enable for genuinely multi-occupant rooms.')
     ap.add_argument('--collapse-lookback', type=float, default=0.6,
                     help='seconds of bbox history used to measure how fast the person box flattens')
     ap.add_argument('--collapse-aspect', type=float, default=0.8,
@@ -361,7 +366,9 @@ def main():
             da, dtop = collapse_metrics(bbox_hist, gray128.shape[0], args.collapse_lookback)
             fast_collapse = da >= args.collapse_aspect or dtop >= args.collapse_drop
             people_hist.append(count_person_blobs(gray128, min_pixels=args.person_min_pixels))
-            multi_person = int(np.median(people_hist)) >= 2   # debounced: 2+ people -> suppress FALL alerts
+            # only meaningful when --multi-suppress is on; off by default (a lone person splits into
+            # several warm blobs, which would wrongly suppress a real fall)
+            multi_person = args.multi_suppress and int(np.median(people_hist)) >= 2
             over = over + 1 if (p is not None and ema >= args.thr) else 0
             # two independent FALL triggers, both respecting the cooldown:
             #   model_alarm    = CNN motion window says fall (+ optional descent gate)
