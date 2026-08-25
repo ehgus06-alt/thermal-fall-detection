@@ -221,13 +221,15 @@ def posture_aspect(gray, pct=92, min_pixels=25):
         return None
     return (c.max() - c.min() + 1) / (r.max() - r.min() + 1)
 
-def person_bbox(gray, pct=92, min_pixels=25):
-    """Bounding box (x0,y0,x1,y1) of the person = the LARGEST warm-blob connected component among the
-    hottest `pct`% pixels, or None if nothing big enough. Taking the biggest component (not the min/max
-    of ALL hot pixels) keeps the box on the person and ignores stray hot pixels or distractors (a
-    radiator, sunlit wall, electronics) that would otherwise inflate it well beyond the body."""
+def person_bbox(gray, pct=85, min_pixels=25):
+    """Bounding box (x0,y0,x1,y1) of the person = LARGEST warm-blob connected component among the
+    hottest `pct`% pixels, or None. A lower pct also captures cooler body parts (legs in trousers)
+    that a high pct misses; open() drops speckle and a vertical close() bridges the torso-legs gap so
+    the body stays ONE blob. Largest-component still rejects distractors (radiator, sunlit wall)."""
     m = (gray >= np.percentile(gray, pct)).astype(np.uint8)
-    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))   # drop speckle noise
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN,  np.ones((3, 3), np.uint8))   # denoise speckle
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE,                              # bridge split body parts (tall kernel)
+                         cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 9)))
     num, _, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
     if num <= 1:
         return None
@@ -311,6 +313,9 @@ def main():
                          'unreliable with multiple people). Leave OFF for a single occupant: thermal blobs '
                          'split a lone person (bare skin vs cool clothes) into several, which would mask a '
                          'real fall. Only enable for genuinely multi-occupant rooms.')
+    ap.add_argument('--bbox-pct', type=float, default=85.0,
+                    help='warm-pixel percentile for the person box (lower = captures cooler parts like '
+                         'trousered legs but risks distractors; raise if the box grabs warm clutter). Watch the HUD box.')
     ap.add_argument('--collapse-lookback', type=float, default=0.6,
                     help='seconds of bbox history used to measure how fast the person box flattens')
     ap.add_argument('--collapse-aspect', type=float, default=0.8,
@@ -368,7 +373,7 @@ def main():
             cy_hist.append(blob_centroid_y(gray128))
             descent = recent_descent(cy_hist, gray128.shape[0])
             # bbox collapse-speed: how fast the warm-blob box flattens (fall) vs eases down (lie-down)
-            bb = person_bbox(gray128)
+            bb = person_bbox(gray128, pct=args.bbox_pct)
             if bb is not None:
                 bbox_hist.append((now, bbox_aspect(bb), bb[1]))
             da, dtop = collapse_metrics(bbox_hist, gray128.shape[0], args.collapse_lookback)
