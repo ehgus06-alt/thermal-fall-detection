@@ -98,31 +98,38 @@ def open_camera(idx, y16):
         c.release()
     return None
 
-def camera_source(idx, y16, reconnect_wait=3.0, tick=0.5):
+def camera_source(idx, y16, reconnect_wait=3.0, tick=0.2):
     """Never-dying camera generator. Yields a frame when the Lepton is healthy, or None when it's
-    down - so the caller keeps running and heartbeats thermal=FAIL to the backend. Reconnects on its
-    own: a missing or dead camera no longer crashes or silently stops the monitor. Runs until Ctrl-C."""
-    cap = None; last_try = 0.0; down_announced = False
+    down - so the caller keeps running and heartbeats thermal=FAIL to the backend. A missing or dead
+    camera no longer crashes or silently stops the monitor. Reconnection runs in a BACKGROUND thread
+    so opening a camera (slow on Windows: seconds per backend) never blocks the heartbeat. Ctrl-C to stop."""
+    cap = {'c': None}; opening = {'busy': False}; announced = {'down': False}; last_try = [0.0]
+
+    def try_open():
+        c = open_camera(idx, y16)                   # slow; runs off the main loop
+        cap['c'] = c; opening['busy'] = False
+        if c is not None:
+            print(f"camera {idx} UP"); announced['down'] = False
+
     while True:
-        if cap is None:
-            if time.time() - last_try >= reconnect_wait:
-                last_try = time.time()
-                cap = open_camera(idx, y16)
-                if cap is not None:
-                    print(f"camera {idx} UP")
-                    down_announced = False
-            if cap is None:
-                if not down_announced:
-                    print(f"camera {idx} DOWN -> thermal=FAIL heartbeats; retrying every {reconnect_wait:.0f}s "
-                          f"(close the FLIR Lepton app if it is holding the device)")
-                    down_announced = True
-                yield None                          # camera down: caller sends a FAIL heartbeat
-                time.sleep(tick)
-                continue
-        ok, frame = cap.read()
-        if not ok or frame is None:                 # mid-run loss -> drop it and reconnect
+        c = cap['c']
+        if c is None:
+            if not opening['busy'] and time.time() - last_try[0] >= reconnect_wait:
+                last_try[0] = time.time(); opening['busy'] = True
+                threading.Thread(target=try_open, daemon=True).start()
+            if not announced['down']:
+                print(f"camera {idx} DOWN -> thermal=FAIL heartbeats; retrying every {reconnect_wait:.0f}s "
+                      f"(close the FLIR Lepton app if it is holding the device)")
+                announced['down'] = True
+            yield None                              # camera down: caller sends a FAIL heartbeat
+            time.sleep(tick)
+            continue
+        ok, frame = c.read()
+        if not ok or frame is None:                 # mid-run loss -> drop it and reconnect (in bg)
             print(f"camera {idx} read failed -> reconnecting")
-            cap.release(); cap = None; last_try = time.time()
+            try: c.release()
+            except Exception: pass
+            cap['c'] = None; last_try[0] = time.time()
             yield None
             time.sleep(tick)
             continue
