@@ -111,7 +111,7 @@ def camera_source(idx, y16):
 #  (WARNING 은 현재 미사용 — LIED 를 WARNING 으로 올리려면 아래 매핑만 바꾸면 됨)
 STATE_EVENT = {'SAFE': 'NORMAL', 'LIED': 'NORMAL', 'FALL': 'FALL_DETECTED'}
 
-def build_payload(*, device_id, now, event_type, confidence, height_drop, posture):
+def build_payload(*, device_id, now, event_type, confidence, height_drop, heavy_vibration, posture):
     return {
         "device_id":        device_id,
         "timestamp":        time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(now)),  # ISO8601 UTC
@@ -119,10 +119,29 @@ def build_payload(*, device_id, now, event_type, confidence, height_drop, postur
         "confidence_score": round(float(confidence), 3),   # AI 확신도 0.0 ~ 1.0
         "sensor_summary": {                                # 부가정보 (대시보드 표시용)
             "height_drop":     bool(height_drop),          # 급격한 고도 하락 (descent/dtop 기반)
-            "heavy_vibration": False,                      # TODO: 가속도센서 연결 시 채우기 (현재 센서 없음)
+            "heavy_vibration": bool(heavy_vibration),      # mmWave 진동센서 (현재 목업; 하드웨어 부착 시 실측)
             "posture":         posture,                    # "horizontal" | "vertical"
         },
     }
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── mmWave 진동센서 (현재 목업) ──────────────────────────────────────────────
+# 실제 mmWave 모듈이 아직 없어서(부품 대기) 목업 bool 을 돌려줍니다. 하드웨어가 오면
+# read() 안의 목업 분기를 실제 드라이버 읽기로 바꾸기만 하면 됩니다 (True/False 계약 유지).
+class VibrationSensor:
+    """'지금 바닥 진동이 있는가?' 를 yes/no 로 답한다. mmWave 부착 전까지는 목업.
+    mode: off=항상 False | on=항상 True | random=가끔 튐 | on-fall=낙상 충격 때만 True."""
+    def __init__(self, mode='on-fall', pulse_sec=2.0, seed=None):
+        self.mode = mode; self.pulse_sec = pulse_sec
+        self.rng = np.random.default_rng(seed); self._pulse_until = 0.0
+    def pulse(self, now):
+        """낙상 충격 같은 외부 이벤트가 목업 진동을 pulse_sec 초 동안 True 로 만든다."""
+        self._pulse_until = max(self._pulse_until, now + self.pulse_sec)
+    def read(self, now):
+        if self.mode == 'on':      return True
+        if self.mode == 'random':  return bool(self.rng.random() < 0.05)   # 가끔 한 번 튀는 노이즈
+        if self.mode == 'on-fall': return now < self._pulse_until          # 낙상 직후에만 감지
+        return False                                                       # 'off'
 # ═══════════════════════════════════════════════════════════════════════════
 
 def post_json(url, payload, timeout=4):
@@ -243,6 +262,10 @@ def main():
                     help='let a FAST bbox collapse latch FALL on its own (catches CNN misses). OFF by default: '
                          'collapse thresholds are viewpoint-dependent - calibrate per fixed camera by watching da/dtop on the '
                          'HUD, and they can false-fire on fast sit-downs. Leave off to keep the CNN as the sole trigger.')
+    ap.add_argument('--vibration-mock', choices=['off', 'on', 'random', 'on-fall'], default='on-fall',
+                    help='MOCK mmWave vibration sensor (hardware pending). off=always false, on=always true, '
+                         'random=occasional blip, on-fall=fires for ~2s after a detected fall (realistic). '
+                         'Swap VibrationSensor.read() for the real driver when the module arrives.')
     args = ap.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -262,8 +285,10 @@ def main():
     # backend sender state: 5s heartbeat + immediate send whenever the debounced event changes
     pending_event = 'NORMAL'; pending_since = t0; confirmed_event = 'NORMAL'
     last_reported = None; last_send = 0.0
+    vib = VibrationSensor(args.vibration_mock)   # MOCK until the mmWave module is attached
     print(f"backend={args.webhook or '(none: pass --webhook)'}  "
           f"heartbeat={args.heartbeat}s  state-hold={args.state_hold}s")
+    print(f"vibration sensor = MOCK ({args.vibration_mock})  <- swap VibrationSensor.read() for real mmWave")
     for i, frame in enumerate(src):
         gray128 = frame if sim else prep_gray128(frame_to_gray(frame, args.y16))
         if i % args.stride:
@@ -307,6 +332,9 @@ def main():
         else:
             upright_count = 0
         state = 'FALL' if fall_latched else ('LIED' if lying else 'SAFE')
+        if state == 'FALL':
+            vib.pulse(now)                       # mock: a fall's impact drives the vibration sensor
+        vibration = vib.read(now)
 
         # ---- backend sender: 5s heartbeat + immediate send on a debounced state change ----
         # A state must persist --state-hold seconds to be 'confirmed', so spikes from sudden
@@ -322,11 +350,13 @@ def main():
         if changed or (now - last_send) >= args.heartbeat:
             if changed:
                 tag = ' [multi-person: FALL suppressed]' if (multi_person and confirmed_event == 'FALL_DETECTED') else ''
-                print(f"  >>> event -> {report_event}{tag}  (backend {'sent' if args.webhook else 'skipped: no URL'})")
+                vibtag = ' vibration=ON' if vibration else ''
+                print(f"  >>> event -> {report_event}{tag}{vibtag}  (backend {'sent' if args.webhook else 'skipped: no URL'})")
             if args.webhook:
                 post_json(args.webhook, build_payload(
                     device_id=args.device_id, now=now, event_type=report_event, confidence=ema,
                     height_drop=max(descent, dtop) >= args.collapse_drop,
+                    heavy_vibration=vibration,
                     posture='horizontal' if lying else 'vertical'))
             last_reported = report_event; last_send = now
 
