@@ -157,17 +157,36 @@ def build_payload(*, device_id, seq, now, report_type, event_type, sensor_health
     }
 # ═══════════════════════════════════════════════════════════════════════════
 
-def post_json(url, payload, timeout=4):
-    """POST a JSON payload in a background thread so detection never blocks on the network."""
+_send_stats = {'ok': 0, 'fail': 0}
+_send_lock = threading.Lock()
+
+def post_json(url, payload, timeout=4, retries=0, backoff=1.0):
+    """POST JSON in a background thread so detection never blocks on the network. Retries up to
+    `retries` extra times with exponential backoff (1,2,4,... capped 8s) so a transient blip does
+    not lose a critical EVENT (e.g. DANGER). seq is constant across retries -> backend can dedup.
+    First-try successes are silent (heartbeats are frequent); retries and final failures are logged."""
     def _send():
-        try:
-            data = json.dumps(payload).encode('utf-8')
-            req = urllib.request.Request(url, data=data,
-                                         headers={'Content-Type': 'application/json'}, method='POST')
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                print(f"    webhook -> {url} [{r.status}]")
-        except Exception as e:
-            print(f"    webhook FAILED -> {url}: {e}")
+        data = json.dumps(payload).encode('utf-8')
+        seq = payload.get('seq')
+        for attempt in range(retries + 1):
+            try:
+                req = urllib.request.Request(url, data=data,
+                                             headers={'Content-Type': 'application/json'}, method='POST')
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    with _send_lock:
+                        _send_stats['ok'] += 1
+                    if attempt:
+                        print(f"    webhook OK on retry {attempt} (seq={seq}) [{r.status}]")
+                    return
+            except Exception as e:
+                if attempt < retries:
+                    time.sleep(min(backoff * (2 ** attempt), 8.0))
+                else:
+                    with _send_lock:
+                        _send_stats['fail'] += 1
+                        fails = _send_stats['fail']
+                    tries = 'tries' if retries else 'try'
+                    print(f"    webhook FAILED (seq={seq}) after {retries + 1} {tries}: {e}  [total fails={fails}]")
     threading.Thread(target=_send, daemon=True).start()
 
 def blob_centroid_y(gray, pct=88):
@@ -261,6 +280,11 @@ def main():
                     help='blob width/height above this = LIED (lying) state shown in orange. Tune to your camera using the w/h shown on the HUD.')
     ap.add_argument('--webhook', default=WEBHOOK_URL, help='backend URL for status JSON (heartbeat + events). default = WEBHOOK_URL at top of file')
     ap.add_argument('--device-id', default='pi_node_01', help='device id included in every backend payload')
+    ap.add_argument('--send-retries', type=int, default=3,
+                    help='extra retry attempts (exponential backoff) for EVENT sends so a transient network '
+                         'blip does not lose a DANGER alert; heartbeats are not retried (the next one covers it)')
+    ap.add_argument('--send-backoff', type=float, default=1.0,
+                    help='base seconds for EVENT send retry backoff (1,2,4,... capped at 8s)')
     ap.add_argument('--heartbeat', type=float, default=5.0,
                     help='seconds between keep-alive heartbeats to the backend (current status; proves the link is alive)')
     ap.add_argument('--state-hold', type=float, default=2.0,
@@ -427,10 +451,13 @@ def main():
             elif health_changed:
                 print(f"  >>> thermal={health['thermal']}  (heartbeat, backend {'sent' if args.webhook else 'skipped: no URL'})")
             if args.webhook:
+                # EVENT (person-state change, incl. DANGER) retries hard; HEARTBEAT relies on the next tick
+                retries = args.send_retries if report_type == 'EVENT' else 0
                 post_json(args.webhook, build_payload(
                     device_id=args.device_id, seq=seq, now=now,
                     report_type=report_type, event_type=report_event, sensor_health=health,
-                    battery_pct=args.battery_pct, rssi=args.rssi, uptime_sec=now - t0))
+                    battery_pct=args.battery_pct, rssi=args.rssi, uptime_sec=now - t0),
+                    retries=retries, backoff=args.send_backoff)
                 seq += 1
             last_reported = report_event; last_send = now; last_thermal = health['thermal']
     fps = n / max(time.time() - t0, 1e-6)
