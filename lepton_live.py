@@ -222,13 +222,21 @@ def posture_aspect(gray, pct=92, min_pixels=25):
     return (c.max() - c.min() + 1) / (r.max() - r.min() + 1)
 
 def person_bbox(gray, pct=92, min_pixels=25):
-    """Tight bounding box (x0,y0,x1,y1) around the warm blob (brightest pixels), or None if too small.
-    Same thresholding as posture_aspect so FALL/LIED geometry stays consistent."""
-    m = gray >= np.percentile(gray, pct)
-    r, c = np.where(m)
-    if r.size < min_pixels:
+    """Bounding box (x0,y0,x1,y1) of the person = the LARGEST warm-blob connected component among the
+    hottest `pct`% pixels, or None if nothing big enough. Taking the biggest component (not the min/max
+    of ALL hot pixels) keeps the box on the person and ignores stray hot pixels or distractors (a
+    radiator, sunlit wall, electronics) that would otherwise inflate it well beyond the body."""
+    m = (gray >= np.percentile(gray, pct)).astype(np.uint8)
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))   # drop speckle noise
+    num, _, stats, _ = cv2.connectedComponentsWithStats(m, connectivity=8)
+    if num <= 1:
         return None
-    return int(c.min()), int(r.min()), int(c.max()), int(r.max())
+    k = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))                  # largest blob (skip bg label 0)
+    if stats[k, cv2.CC_STAT_AREA] < min_pixels:
+        return None
+    x, y = int(stats[k, cv2.CC_STAT_LEFT]), int(stats[k, cv2.CC_STAT_TOP])
+    w, h = int(stats[k, cv2.CC_STAT_WIDTH]), int(stats[k, cv2.CC_STAT_HEIGHT])
+    return x, y, x + w - 1, y + h - 1
 
 def bbox_aspect(bb):
     """width/height of a bbox. >1 = wide (lying), <1 = tall (standing)."""
