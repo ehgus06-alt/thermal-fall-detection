@@ -12,6 +12,7 @@ same 3-ch (gray/MHI/MEI) window into MobileNetV3. EMA-smoothed prob triggers an 
 a cooldown; each alarm saves a snapshot.
 """
 import os, time, argparse, collections, json, urllib.request, threading
+from datetime import datetime
 import numpy as np
 import cv2
 import torch, torchvision, torch.nn as nn
@@ -107,41 +108,29 @@ def camera_source(idx, y16):
     cap.release()
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  백엔드로 보낼 JSON. state -> event_type 매핑: SAFE/LIED = 정상, FALL = 낙상.
-#  (WARNING 은 현재 미사용 — LIED 를 WARNING 으로 올리려면 아래 매핑만 바꾸면 됨)
-STATE_EVENT = {'SAFE': 'NORMAL', 'LIED': 'NORMAL', 'FALL': 'FALL_DETECTED'}
+#  백엔드로 보낼 JSON (백엔드 확정 스키마).
+#  state -> event_type 매핑: SAFE=안전, LIED(누움)=WARNING, FALL(낙상)=DANGER.
+STATE_EVENT = {'SAFE': 'SAFE', 'LIED': 'WARNING', 'FALL': 'DANGER'}
 
-def build_payload(*, device_id, now, event_type, confidence, height_drop, heavy_vibration, posture):
+def build_payload(*, device_id, seq, now, report_type, event_type, sensor_health,
+                  battery_pct, rssi, uptime_sec):
     return {
-        "device_id":        device_id,
-        "timestamp":        time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(now)),  # ISO8601 UTC
-        "event_type":       event_type,                    # NORMAL | WARNING | FALL_DETECTED
-        "confidence_score": round(float(confidence), 3),   # AI 확신도 0.0 ~ 1.0
-        "sensor_summary": {                                # 부가정보 (대시보드 표시용)
-            "height_drop":     bool(height_drop),          # 급격한 고도 하락 (descent/dtop 기반)
-            "heavy_vibration": bool(heavy_vibration),      # mmWave 진동센서 (현재 목업; 하드웨어 부착 시 실측)
-            "posture":         posture,                    # "horizontal" | "vertical"
+        "device_id":   device_id,                        # 대상자 매칭용 (1~64자)
+        "seq":         int(seq),                          # 전송 일련번호 (중복·순서 판별)
+        "measured_at": datetime.fromtimestamp(now).astimezone().isoformat(timespec='seconds'),  # ISO8601 +TZ
+        "report_type": report_type,                       # HEARTBEAT | EVENT
+        "event_type":  event_type,                        # SAFE | WARNING | DANGER (EVENT 시 필수)
+        "sensor_health": {                                # 센서 3개 생존 여부
+            "vibrator": sensor_health['vibrator'],        # OK | FAIL | UNKNOWN
+            "radar":    sensor_health['radar'],           # OK | FAIL | UNKNOWN
+            "thermal":  sensor_health['thermal'],         # OK | FAIL | UNKNOWN
+        },
+        "device": {                                       # 원격 진동센서 노드 상태 (무선연결 예정, 현재 목업)
+            "battery_pct": int(battery_pct),              # 0~100
+            "rssi":        int(rssi),                     # <=0 (신호 세기, dBm)
+            "uptime_sec":  int(uptime_sec),               # >=0 (재부팅 후 경과)
         },
     }
-# ═══════════════════════════════════════════════════════════════════════════
-
-# ── mmWave 진동센서 (현재 목업) ──────────────────────────────────────────────
-# 실제 mmWave 모듈이 아직 없어서(부품 대기) 목업 bool 을 돌려줍니다. 하드웨어가 오면
-# read() 안의 목업 분기를 실제 드라이버 읽기로 바꾸기만 하면 됩니다 (True/False 계약 유지).
-class VibrationSensor:
-    """'지금 바닥 진동이 있는가?' 를 yes/no 로 답한다. mmWave 부착 전까지는 목업.
-    mode: off=항상 False | on=항상 True | random=가끔 튐 | on-fall=낙상 충격 때만 True."""
-    def __init__(self, mode='on-fall', pulse_sec=2.0, seed=None):
-        self.mode = mode; self.pulse_sec = pulse_sec
-        self.rng = np.random.default_rng(seed); self._pulse_until = 0.0
-    def pulse(self, now):
-        """낙상 충격 같은 외부 이벤트가 목업 진동을 pulse_sec 초 동안 True 로 만든다."""
-        self._pulse_until = max(self._pulse_until, now + self.pulse_sec)
-    def read(self, now):
-        if self.mode == 'on':      return True
-        if self.mode == 'random':  return bool(self.rng.random() < 0.05)   # 가끔 한 번 튀는 노이즈
-        if self.mode == 'on-fall': return now < self._pulse_until          # 낙상 직후에만 감지
-        return False                                                       # 'off'
 # ═══════════════════════════════════════════════════════════════════════════
 
 def post_json(url, payload, timeout=4):
@@ -262,10 +251,17 @@ def main():
                     help='let a FAST bbox collapse latch FALL on its own (catches CNN misses). OFF by default: '
                          'collapse thresholds are viewpoint-dependent - calibrate per fixed camera by watching da/dtop on the '
                          'HUD, and they can false-fire on fast sit-downs. Leave off to keep the CNN as the sole trigger.')
-    ap.add_argument('--vibration-mock', choices=['off', 'on', 'random', 'on-fall'], default='on-fall',
-                    help='MOCK mmWave vibration sensor (hardware pending). off=always false, on=always true, '
-                         'random=occasional blip, on-fall=fires for ~2s after a detected fall (realistic). '
-                         'Swap VibrationSensor.read() for the real driver when the module arrives.')
+    # sensor_health + device: MOCK until the remote mmWave vibration/radar node is wired in
+    ap.add_argument('--health-vibrator', choices=['OK', 'FAIL', 'UNKNOWN'], default='UNKNOWN',
+                    help='MOCK vibrator sensor health (remote mmWave node not attached yet -> UNKNOWN)')
+    ap.add_argument('--health-radar', choices=['OK', 'FAIL', 'UNKNOWN'], default='UNKNOWN',
+                    help='MOCK radar sensor health (remote mmWave node not attached yet -> UNKNOWN)')
+    ap.add_argument('--health-thermal', choices=['OK', 'FAIL', 'UNKNOWN'], default='OK',
+                    help='thermal (Lepton) sensor health; OK while frames are streaming')
+    ap.add_argument('--battery-pct', type=int, default=100,
+                    help='MOCK battery percent of the remote vibration-sensor node (0~100)')
+    ap.add_argument('--rssi', type=int, default=-55,
+                    help='MOCK wireless signal strength to the remote node, dBm (<=0)')
     args = ap.parse_args()
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -283,12 +279,13 @@ def main():
     bbox_hist = collections.deque(maxlen=30)   # (t, aspect, top_y) history for bbox collapse-speed
     people_hist = collections.deque(maxlen=15) # warm-blob count history (~1s) to debounce multi-person
     # backend sender state: 5s heartbeat + immediate send whenever the debounced event changes
-    pending_event = 'NORMAL'; pending_since = t0; confirmed_event = 'NORMAL'
-    last_reported = None; last_send = 0.0
-    vib = VibrationSensor(args.vibration_mock)   # MOCK until the mmWave module is attached
+    pending_event = 'SAFE'; pending_since = t0; confirmed_event = 'SAFE'
+    last_reported = None; last_send = 0.0; seq = 0
+    health = {'vibrator': args.health_vibrator, 'radar': args.health_radar, 'thermal': args.health_thermal}
     print(f"backend={args.webhook or '(none: pass --webhook)'}  "
           f"heartbeat={args.heartbeat}s  state-hold={args.state_hold}s")
-    print(f"vibration sensor = MOCK ({args.vibration_mock})  <- swap VibrationSensor.read() for real mmWave")
+    print(f"sensor_health MOCK: vibrator={health['vibrator']} radar={health['radar']} thermal={health['thermal']}"
+          f"  | device MOCK: battery={args.battery_pct}% rssi={args.rssi}dBm")
     for i, frame in enumerate(src):
         gray128 = frame if sim else prep_gray128(frame_to_gray(frame, args.y16))
         if i % args.stride:
@@ -332,32 +329,29 @@ def main():
         else:
             upright_count = 0
         state = 'FALL' if fall_latched else ('LIED' if lying else 'SAFE')
-        if state == 'FALL':
-            vib.pulse(now)                       # mock: a fall's impact drives the vibration sensor
-        vibration = vib.read(now)
 
         # ---- backend sender: 5s heartbeat + immediate send on a debounced state change ----
         # A state must persist --state-hold seconds to be 'confirmed', so spikes from sudden
-        # movement never reach the backend. With 2+ people the geometry is unreliable, so FALL is
-        # masked to NORMAL: the heartbeat keeps proving the link is alive but no false alert goes out.
+        # movement never reach the backend. With 2+ people the geometry is unreliable, so DANGER is
+        # masked to SAFE: the heartbeat keeps proving the link is alive but no false alert goes out.
         inst_event = STATE_EVENT[state]
         if inst_event != pending_event:
             pending_event = inst_event; pending_since = now
         if pending_event != confirmed_event and (now - pending_since) >= args.state_hold:
             confirmed_event = pending_event
-        report_event = 'NORMAL' if (multi_person and confirmed_event == 'FALL_DETECTED') else confirmed_event
+        report_event = 'SAFE' if (multi_person and confirmed_event == 'DANGER') else confirmed_event
         changed = report_event != last_reported
         if changed or (now - last_send) >= args.heartbeat:
+            report_type = 'EVENT' if changed else 'HEARTBEAT'
             if changed:
-                tag = ' [multi-person: FALL suppressed]' if (multi_person and confirmed_event == 'FALL_DETECTED') else ''
-                vibtag = ' vibration=ON' if vibration else ''
-                print(f"  >>> event -> {report_event}{tag}{vibtag}  (backend {'sent' if args.webhook else 'skipped: no URL'})")
+                tag = ' [multi-person: DANGER suppressed]' if (multi_person and confirmed_event == 'DANGER') else ''
+                print(f"  >>> EVENT -> {report_event}{tag}  (backend {'sent' if args.webhook else 'skipped: no URL'})")
             if args.webhook:
                 post_json(args.webhook, build_payload(
-                    device_id=args.device_id, now=now, event_type=report_event, confidence=ema,
-                    height_drop=max(descent, dtop) >= args.collapse_drop,
-                    heavy_vibration=vibration,
-                    posture='horizontal' if lying else 'vertical'))
+                    device_id=args.device_id, seq=seq, now=now,
+                    report_type=report_type, event_type=report_event, sensor_health=health,
+                    battery_pct=args.battery_pct, rssi=args.rssi, uptime_sec=now - t0))
+                seq += 1
             last_reported = report_event; last_send = now
 
         if alarm:
