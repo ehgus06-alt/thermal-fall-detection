@@ -164,11 +164,31 @@ def build_payload(*, device_id, seq, now, report_type, event_type, sensor_health
     }
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _primary_nic_mac():
+    """MAC of the interface that actually reaches the network (the one owning the outbound-route IP),
+    normalized to lowercase colons. This avoids uuid.getnode() picking a sibling NIC (Wi-Fi vs the
+    Bluetooth/other adapter on the same chip, whose MAC differs by one). None if undeterminable."""
+    try:
+        import socket, psutil
+    except ImportError:
+        return None
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80)); ip = s.getsockname()[0]; s.close()
+    except OSError:
+        return None
+    for name, addrs in psutil.net_if_addrs().items():
+        if any(a.family == socket.AF_INET and a.address == ip for a in addrs):
+            for a in addrs:
+                if a.family == psutil.AF_LINK and a.address:
+                    return a.address.lower().replace('-', ':')
+    return None
+
 def device_mac(iface=None):
-    """MAC address 'aa:bb:cc:dd:ee:ff' for use as device_id. With an explicit interface name (e.g.
-    wlan0 / eth0 on the Pi) it reads THAT NIC's MAC from Linux /sys - the reliable way to pin down
-    which of several MACs to report. Otherwise it falls back to uuid.getnode() (a real NIC's MAC,
-    but on a multi-NIC host not necessarily the one you expect -> prefer --mac-iface on a device)."""
+    """MAC address 'aa:bb:cc:dd:ee:ff' (lowercase colons) for use as device_id. With an explicit
+    interface name (e.g. wlan0 / eth0 on the Pi) it reads THAT NIC's MAC from Linux /sys. Otherwise
+    it picks the interface that actually reaches the network, and only as a last resort falls back to
+    uuid.getnode() (which on a multi-NIC host may report a sibling adapter, not the one you expect)."""
     if iface:
         try:
             with open(f'/sys/class/net/{iface}/address') as f:
@@ -176,8 +196,11 @@ def device_mac(iface=None):
             if mac:
                 return mac
         except OSError:
-            print(f"    [device_id] interface '{iface}' not found -> falling back to uuid.getnode()")
-    node = uuid.getnode()
+            print(f"    [device_id] interface '{iface}' not found -> auto-detecting the network NIC")
+    mac = _primary_nic_mac()                          # the interface that reaches the backend
+    if mac:
+        return mac
+    node = uuid.getnode()                             # last resort (may pick the wrong NIC)
     return ':'.join(f'{(node >> e) & 0xff:02x}' for e in range(40, -1, -8))
 
 _send_stats = {'ok': 0, 'fail': 0}
