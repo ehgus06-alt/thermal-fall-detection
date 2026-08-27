@@ -11,7 +11,7 @@ Preprocessing matches training exactly: grayscale -> per-frame 2-98% percentile 
 same 3-ch (gray/MHI/MEI) window into MobileNetV3. EMA-smoothed prob triggers an alarm with
 a cooldown; each alarm saves a snapshot.
 """
-import os, time, argparse, collections, json, urllib.request, threading
+import os, time, argparse, collections, json, urllib.request, threading, uuid
 from datetime import datetime
 import numpy as np
 import cv2
@@ -25,7 +25,7 @@ CACHE = os.path.join(HERE, "cache")
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  백엔드 주소: 이 한 줄만 당신 서버 주소로 바꾸세요 (또는 실행 시 --webhook 로 지정)
-WEBHOOK_URL = ""      # 예: "https://your-site.com/api/fall"
+WEBHOOK_URL = "https://cherry-fall.duckdns.org/api/device/data"      # 예: "https://your-site.com/api/fall"
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ---------- preprocessing (identical to cache_frames.py) ----------
@@ -164,6 +164,22 @@ def build_payload(*, device_id, seq, now, report_type, event_type, sensor_health
     }
 # ═══════════════════════════════════════════════════════════════════════════
 
+def device_mac(iface=None):
+    """MAC address 'aa:bb:cc:dd:ee:ff' for use as device_id. With an explicit interface name (e.g.
+    wlan0 / eth0 on the Pi) it reads THAT NIC's MAC from Linux /sys - the reliable way to pin down
+    which of several MACs to report. Otherwise it falls back to uuid.getnode() (a real NIC's MAC,
+    but on a multi-NIC host not necessarily the one you expect -> prefer --mac-iface on a device)."""
+    if iface:
+        try:
+            with open(f'/sys/class/net/{iface}/address') as f:
+                mac = f.read().strip()
+            if mac:
+                return mac
+        except OSError:
+            print(f"    [device_id] interface '{iface}' not found -> falling back to uuid.getnode()")
+    node = uuid.getnode()
+    return ':'.join(f'{(node >> e) & 0xff:02x}' for e in range(40, -1, -8))
+
 _send_stats = {'ok': 0, 'fail': 0}
 _send_lock = threading.Lock()
 
@@ -300,7 +316,11 @@ def main():
     ap.add_argument('--fall-min-hold', type=float, default=5.0,
                     help='seconds a FALL is held after it fires before it can clear (ignores flicker; clears only on sustained standing after this).')
     ap.add_argument('--webhook', default=WEBHOOK_URL, help='backend URL for status JSON (heartbeat + events). default = WEBHOOK_URL at top of file')
-    ap.add_argument('--device-id', default='pi_node_01', help='device id included in every backend payload')
+    ap.add_argument('--device-id', default=None,
+                    help='device_id in every payload. Default: the MAC address (of --mac-iface, else the primary NIC). Pass a value to override.')
+    ap.add_argument('--mac-iface', default=None,
+                    help='network interface whose MAC becomes the default device_id, e.g. wlan0 or eth0 on the Pi. '
+                         'Use this to pick which of several MACs to report - name the NIC that connects to the backend.')
     ap.add_argument('--send-retries', type=int, default=3,
                     help='extra retry attempts (exponential backoff) for EVENT sends so a transient network '
                          'blip does not lose a DANGER alert; heartbeats are not retried (the next one covers it)')
@@ -362,6 +382,9 @@ def main():
     last_reported = None; last_send = 0.0; seq = 0; last_thermal = None
     state = 'SAFE'; multi_person = False        # frozen values reused while the camera is down
     health = {'vibrator': args.health_vibrator, 'radar': args.health_radar, 'thermal': args.health_thermal}
+    device_id = args.device_id or device_mac(args.mac_iface)   # default device_id = this device's MAC
+    print(f"device_id={device_id}" + ("" if args.device_id else
+          f"  (auto MAC{' of ' + args.mac_iface if args.mac_iface else ', primary NIC - use --mac-iface to pin one'})"))
     print(f"backend={args.webhook or '(none: pass --webhook)'}  "
           f"heartbeat={args.heartbeat}s  state-hold={args.state_hold}s")
     print(f"sensor_health: vibrator={health['vibrator']}(mock) radar={health['radar']}(mock) "
@@ -496,7 +519,7 @@ def main():
                 # EVENT (person-state change, incl. DANGER) retries hard; HEARTBEAT relies on the next tick
                 retries = args.send_retries if report_type == 'EVENT' else 0
                 post_json(args.webhook, build_payload(
-                    device_id=args.device_id, seq=seq, now=now,
+                    device_id=device_id, seq=seq, now=now,
                     report_type=report_type, event_type=report_event, sensor_health=health,
                     battery_pct=args.battery_pct, rssi=args.rssi, uptime_sec=now - t0),
                     retries=retries, backoff=args.send_backoff)
