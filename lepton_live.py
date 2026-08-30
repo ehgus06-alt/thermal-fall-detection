@@ -336,8 +336,10 @@ def main():
                     help='blob width/height above this = LIED (lying) state shown in orange. Tune to your camera using the w/h shown on the HUD.')
     ap.add_argument('--lie-hyst', type=float, default=0.3,
                     help='lying hysteresis: once down, stay down until w/h drops below (lie-aspect - this). Stops FALL/LIED flicker near the threshold.')
-    ap.add_argument('--fall-min-hold', type=float, default=5.0,
-                    help='seconds a FALL is held after it fires before it can clear (ignores flicker; clears only on sustained standing after this).')
+    ap.add_argument('--lie-commit', type=float, default=2.0,
+                    help='seconds a person must stay horizontal with NO fall detected before the state LOCKS to LIED '
+                         '(a calm lie-down). Once locked, LIED never flips to FALL until they stand up. A fall during '
+                         'this window commits FALL instead. Raise it to give a late fall trigger more time to win.')
     ap.add_argument('--webhook', default=WEBHOOK_URL, help='backend URL for status JSON (heartbeat + events). default = WEBHOOK_URL at top of file')
     ap.add_argument('--device-id', default=None,
                     help='device_id in every payload. Default: the MAC address (of --mac-iface, else the primary NIC). Pass a value to override.')
@@ -395,7 +397,7 @@ def main():
     sim = args.simclip is not None
     src = simclip_source(args.simclip) if sim else camera_source(args.camera, args.y16, args.reconnect_wait)
     last_alarm = -1e9; n = 0; t0 = time.time(); fired_any = False; over = 0
-    fall_latched = False; upright_count = 0; fall_start = 0.0; lying = False   # FALL latch + hysteresis state
+    down_state = None; upright_count = 0; lying = False; lying_since = 0.0   # commit-and-lock down-state
     cy_hist = collections.deque(maxlen=15)     # blob centroid history for descent gate
     aspect_hist = collections.deque(maxlen=8)  # blob w/h history for LIED posture state
     bbox_hist = collections.deque(maxlen=30)   # (t, aspect, top_y) history for bbox collapse-speed
@@ -440,35 +442,42 @@ def main():
             collapse_alarm = args.collapse_trigger and fast_collapse
             alarm = (model_alarm or collapse_alarm) and now - last_alarm > args.cooldown
 
-            # posture + FALL-latch state machine.
-            # LIED vs FALL is NOT about the pose (both end wide/horizontal) but about HOW you got
-            # there: a fall fires the model -> FALL latched until you stand up again; a slow
-            # lie-down never fires -> LIED. Aspect only tells us "is the person still down".
+            # posture: is the person horizontal now? (hysteresis so aspect jitter near the threshold
+            # does not toggle 'lying' - enter at --lie-aspect, leave below --lie-aspect - --lie-hyst)
             wh = posture_aspect(gray128)
             if wh is not None:
                 aspect_hist.append(wh)
             med_wh = float(np.median(aspect_hist)) if aspect_hist else 0.0
-            # 'lying' with hysteresis: enter at --lie-aspect, stay down until it drops below
-            # (--lie-aspect - --lie-hyst). Stops aspect jitter near the threshold from toggling.
             if not lying and med_wh >= args.lie_aspect:
                 lying = True
             elif lying and med_wh < args.lie_aspect - args.lie_hyst:
                 lying = False
-            # FALL latch with a minimum hold: once a fall fires, hold FALL for --fall-min-hold seconds
-            # (ignoring flicker), then clear only after sustained upright. Kills FALL<->LIED oscillation.
-            if alarm:
-                if not fall_latched:
-                    fall_start = now
-                fall_latched = True; upright_count = 0
-            elif fall_latched and (now - fall_start) < args.fall_min_hold:
-                upright_count = 0                     # inside min-hold: stay FALL no matter what
-            elif not lying:
-                upright_count += 1
-                if upright_count >= 8:                # sustained upright -> person got back up
-                    fall_latched = False
-            else:
-                upright_count = 0
-            state = 'FALL' if fall_latched else ('LIED' if lying else 'SAFE')
+
+            # commit-and-LOCK the down-state. LIED vs FALL is decided ONCE by HOW the person went down,
+            # then locked - it never flips to the other while they stay down (a settled lie-down cannot
+            # later become FALL; a fall cannot relax into LIED):
+            #   - an alarm (fall dynamics) commits FALL immediately
+            #   - staying horizontal for --lie-commit s with NO alarm commits LIED (a calm lie-down)
+            #   - either commit clears only after standing back up (sustained upright)
+            if down_state is None:                    # not yet committed
+                if alarm:
+                    down_state = 'FALL'
+                elif lying:
+                    lying_since = lying_since or now
+                    if now - lying_since >= args.lie_commit:
+                        down_state = 'LIED'
+                else:
+                    lying_since = 0.0
+            else:                                     # committed -> locked
+                if not lying:
+                    upright_count += 1
+                    if upright_count >= 8:            # stood back up -> release to SAFE
+                        down_state = None; lying_since = 0.0
+                else:
+                    upright_count = 0
+            # during the pre-commit grace window a horizontal person still SHOWS LIED (tentative), but
+            # an alarm in that window can still promote to FALL (catches a slightly-late fall trigger)
+            state = down_state or ('LIED' if lying else 'SAFE')
 
             if alarm:
                 last_alarm = now; fired_any = True
