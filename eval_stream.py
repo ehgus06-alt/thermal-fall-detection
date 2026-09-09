@@ -3,11 +3,18 @@ Deployment-realistic evaluation: run the streaming EMA detector over each VAL cl
 (same split as train.py) and score clip-level detection. Sweeps EMA threshold and
 also reports the raw max-window-prob metric for comparison.
 """
-import os, numpy as np, torch, torchvision, torch.nn as nn
+import os, argparse, numpy as np, torch, torchvision, torch.nn as nn
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (average_precision_score, precision_recall_fscore_support,
                              roc_auc_score, confusion_matrix, roc_curve, precision_recall_curve)
 from dataset import make_window_feat, load_manifest
+
+_ap = argparse.ArgumentParser()
+_ap.add_argument('--wandb', action='store_true', help='log deployment metrics + curves to Weights & Biases')
+_ap.add_argument('--wandb_project', default='thermal-fall')
+_ap.add_argument('--wandb_run', default='eval-stream')
+ARGS = _ap.parse_args()
+
 HERE  = os.path.dirname(os.path.abspath(__file__))
 CACHE = os.path.join(HERE, "cache")
 CKPT  = os.path.join(HERE, "runs", "best.pt")
@@ -122,6 +129,9 @@ def report_metrics(score, name, thr):
     print(f"  --- copy-paste CSV row ---")
     print(f"  Recall,Precision,Specificity,F1,F2,AUROC,AP,MissedFalls")
     print(f"  {recall:.3f},{precision:.3f},{specificity:.3f},{f1:.3f},{f2:.3f},{auroc:.3f},{ap:.3f},{fn}")
+    return dict(recall=recall, precision=precision, specificity=specificity, far=far,
+                f1=f1, f2=f2, auroc=auroc, ap=ap, thr=float(thr),
+                TP=int(tp), FP=int(fp), FN=int(fn), TN=int(tn), missed=int(fn))
 
 def save_curves(score, name, thr_mark=None, out_dir=os.path.join(HERE, 'runs')):
     """Save ROC + PR curves as one PNG for the report. The chosen operating point (thr_mark)
@@ -168,5 +178,22 @@ op_thr = zero_miss_thr(maxema)
 op_name = "max-EMA @ zero-miss (recall-first)"
 if op_thr is None:
     op_thr, op_name = best_fbeta_thr(maxema), "max-EMA @ best-F2 (no zero-miss point on VAL)"
-report_metrics(maxema, op_name, op_thr)
+rep = report_metrics(maxema, op_name, op_thr)
 save_curves(maxema, "max-EMA", op_thr)
+
+if ARGS.wandb:
+    import wandb
+    run = wandb.init(project=ARGS.wandb_project, name=ARGS.wandb_run,
+                     config=dict(operating_point=op_name, W=int(W), n_val=len(y), n_pos=int(y.sum())))
+    run.summary.update({f'deploy/{k}': v for k, v in rep.items()})   # recall/precision/f1/f2/auroc/ap/...
+    # PR + ROC curves as native W&B plots (interactive) + the saved PNG
+    probs2 = np.stack([1 - maxema, maxema], axis=1)
+    run.log({'pr_curve':  wandb.plot.pr_curve(y, probs2, labels=['nonfall', 'fall']),
+             'roc_curve': wandb.plot.roc_curve(y, probs2, labels=['nonfall', 'fall']),
+             'confusion': wandb.plot.confusion_matrix(y_true=y.tolist(),
+                          preds=(maxema >= op_thr).astype(int).tolist(), class_names=['nonfall', 'fall'])})
+    png = os.path.join(HERE, 'runs', 'roc_pr.png')
+    if os.path.exists(png):
+        run.log({'roc_pr_png': wandb.Image(png)})
+    run.finish()
+    print(f"[wandb] logged deployment metrics -> project '{ARGS.wandb_project}' run '{ARGS.wandb_run}'")

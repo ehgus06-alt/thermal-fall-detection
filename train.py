@@ -69,6 +69,9 @@ def main():
     ap.add_argument('--full', action='store_true', help='train on ALL clips, no val split (final deploy model)')
     ap.add_argument('--augment', action='store_true', help='train-time augmentation (flip/shift/bright/noise/blur/polarity)')
     ap.add_argument('--deploy_thr', type=float, default=0.5, help='threshold embedded in --full model')
+    ap.add_argument('--wandb', action='store_true', help='log metrics/curves to Weights & Biases')
+    ap.add_argument('--wandb_project', default='thermal-fall', help='W&B project name')
+    ap.add_argument('--wandb_run', default='', help='W&B run name (default: auto from --tag)')
     args = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
     torch.manual_seed(args.seed); np.random.seed(args.seed)
@@ -109,6 +112,14 @@ def main():
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
     scaler = torch.amp.GradScaler('cuda')
 
+    run = None
+    if args.wandb:
+        import wandb
+        run = wandb.init(project=args.wandb_project,
+                         name=(args.wandb_run or f"mnv3{args.tag}"),
+                         config=vars(args))
+        run.watch(model, log='gradients', log_freq=100)
+
     best_ap, log = -1, []
     for ep in range(1, args.epochs + 1):
         model.train(); t0 = time.time(); tot = 0.0
@@ -129,13 +140,22 @@ def main():
             print(f"ep{ep:02d} loss={m['train_loss']:.3f} AP={m['ap']:.3f} "
                   f"F1={m['f1']:.3f} P={m['precision']:.3f} R={m['recall']:.3f} "
                   f"thr={m['thr']:.2f} ({sec}s)", flush=True)
+            if run:
+                run.log({'epoch': ep, 'train_loss': m['train_loss'], 'sec': sec,
+                         'val/AP': m['ap'], 'val/F1': m['f1'], 'val/precision': m['precision'],
+                         'val/recall': m['recall'], 'val/thr': m['thr']}, step=ep)
             if m['ap'] > best_ap:
                 best_ap = m['ap']
                 torch.save(dict(model=model.state_dict(), args=vars(args), metrics=m),
                            os.path.join(OUT, f'best{args.tag}.pt'))
+                if run:
+                    run.summary['best/AP'] = best_ap; run.summary['best/epoch'] = ep
+                    run.summary.update({f'best/{k}': m[k] for k in ('f1', 'precision', 'recall', 'thr')})
         else:                                                 # --full: save final-epoch model
             log.append(dict(epoch=ep, train_loss=tot / len(tr), sec=sec))
             print(f"ep{ep:02d} loss={tot / len(tr):.3f} (full-train, {sec}s)", flush=True)
+            if run:
+                run.log({'epoch': ep, 'train_loss': tot / len(tr), 'sec': sec}, step=ep)
             torch.save(dict(model=model.state_dict(), args=vars(args),
                             metrics=dict(thr=args.deploy_thr, n_train=len(tr), note='full-train, no val')),
                        os.path.join(OUT, f'best{args.tag}.pt'))
@@ -145,6 +165,8 @@ def main():
         print(f"done. best val AP={best_ap:.3f} -> {os.path.join(OUT, f'best{args.tag}.pt')}", flush=True)
     else:
         print(f"done. FULL model on {len(tr)} clips -> {os.path.join(OUT, f'best{args.tag}.pt')}", flush=True)
+    if run:
+        run.finish()
 
 if __name__ == '__main__':
     main()
