@@ -9,7 +9,8 @@ import numpy as np
 import torch, torch.nn as nn
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import average_precision_score, precision_recall_fscore_support
+from sklearn.metrics import (average_precision_score, precision_recall_fscore_support,
+                             roc_auc_score, confusion_matrix)
 import torchvision
 
 from dataset import ClipBagDataset, collate_bags, load_manifest
@@ -44,6 +45,7 @@ def evaluate(model, loader, device):
         ys.append(labels.numpy())
     y = np.concatenate(ys); p = np.concatenate(ps)
     ap = average_precision_score(y, p)
+    auroc = roc_auc_score(y, p) if len(set(y.tolist())) > 1 else float('nan')
     # best-F1 threshold sweep
     best = (0, 0.5, 0, 0)
     for t in np.linspace(0.05, 0.95, 19):
@@ -51,8 +53,12 @@ def evaluate(model, loader, device):
                                                         average='binary', zero_division=0)
         if f1 > best[0]:
             best = (f1, t, pr, rc)
-    return dict(ap=float(ap), f1=float(best[0]), thr=float(best[1]),
-                precision=float(best[2]), recall=float(best[3]), n=len(y))
+    # confusion matrix at the chosen best-F1 threshold (same threshold as P/R/F1 above)
+    tn, fp, fn, tp = confusion_matrix(y, (p >= best[1]).astype(int), labels=[0, 1]).ravel()
+    specificity = tn / max(tn + fp, 1)
+    return dict(ap=float(ap), auroc=float(auroc), f1=float(best[0]), thr=float(best[1]),
+                precision=float(best[2]), recall=float(best[3]), specificity=float(specificity),
+                TP=int(tp), FP=int(fp), FN=int(fn), TN=int(tn), n=len(y))
 
 def main():
     ap = argparse.ArgumentParser()
@@ -62,7 +68,13 @@ def main():
     ap.add_argument('--W', type=int, default=24)
     ap.add_argument('--stride', type=int, default=8)
     ap.add_argument('--lr', type=float, default=3e-4)
-    ap.add_argument('--seed', type=int, default=42)
+    ap.add_argument('--seed', type=int, default=42, help='init/shuffle/augment seed (vary across repeats)')
+    ap.add_argument('--split_seed', type=int, default=42,
+                    help='seed for the train/val split ONLY. Keep fixed (42) across repeats so every '
+                         'seed sees the SAME val set; vary --seed for the mean+-std over runs.')
+    ap.add_argument('--input_mode', default='full', choices=['full', 'still', 'stack', 'no_mhi'],
+                    help='MHI ablation: full=[gray,MHI,MEI], still=[gray,gray,gray], '
+                         'stack=[t-16,t-8,t], no_mhi=[gray,MEI,gray]')
     ap.add_argument('--train_source', default='all', help="'all' | 'flir' | 'khan'")
     ap.add_argument('--eval_source', default='all', help="'all' | 'flir' | 'khan' (differ from train => cross-dataset)")
     ap.add_argument('--tag', default='', help='suffix for checkpoint/log filenames')
@@ -73,6 +85,8 @@ def main():
     ap.add_argument('--wandb_project', default='thermal-fall', help='W&B project name')
     ap.add_argument('--wandb_run', default='', help='W&B run name (default: auto from --tag)')
     args = ap.parse_args()
+    if not args.tag:                          # self-describing checkpoint/log names: best_<mode>_s<seed>.pt
+        args.tag = f"_{args.input_mode}_s{args.seed}"
     os.makedirs(OUT, exist_ok=True)
     torch.manual_seed(args.seed); np.random.seed(args.seed)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -86,7 +100,7 @@ def main():
     elif args.train_source == args.eval_source:               # in-domain: random split
         pool = pick(args.train_source)
         tr, va = train_test_split(pool, test_size=0.2,
-                                  stratify=[r['label'] for r in pool], random_state=args.seed)
+                                  stratify=[r['label'] for r in pool], random_state=args.split_seed)
     else:                                                     # cross-dataset: train on one, test on other
         tr, va = pick(args.train_source), pick(args.eval_source)
 
@@ -97,11 +111,12 @@ def main():
         print(f"train[{args.train_source}] {len(tr)} clips {comp(tr)} pos={sum(r['label'] for r in tr)} | "
               f"val[{args.eval_source}] {len(va)} clips {comp(va)} pos={sum(r['label'] for r in va)}", flush=True)
 
-    tr_ds = ClipBagDataset(tr, W=args.W, stride=args.stride, K=args.K, train=True, augment=args.augment)
+    tr_ds = ClipBagDataset(tr, W=args.W, stride=args.stride, K=args.K, train=True, augment=args.augment,
+                           input_mode=args.input_mode)
     tr_ld = DataLoader(tr_ds, batch_size=args.bs, shuffle=True, num_workers=0, collate_fn=collate_bags)
     va_ld = None
     if va is not None:
-        va_ds = ClipBagDataset(va, W=args.W, stride=args.stride, train=False)
+        va_ds = ClipBagDataset(va, W=args.W, stride=args.stride, train=False, input_mode=args.input_mode)
         va_ld = DataLoader(va_ds, batch_size=4, shuffle=False, num_workers=0, collate_fn=collate_bags)
 
     model = build_model().to(device)
@@ -137,12 +152,13 @@ def main():
             m = evaluate(model, va_ld, device)
             m.update(epoch=ep, train_loss=tot / len(tr), sec=sec)
             log.append(m)
-            print(f"ep{ep:02d} loss={m['train_loss']:.3f} AP={m['ap']:.3f} "
-                  f"F1={m['f1']:.3f} P={m['precision']:.3f} R={m['recall']:.3f} "
-                  f"thr={m['thr']:.2f} ({sec}s)", flush=True)
+            print(f"ep{ep:02d} loss={m['train_loss']:.3f} AP={m['ap']:.3f} AUROC={m['auroc']:.3f} "
+                  f"F1={m['f1']:.3f} P={m['precision']:.3f} R={m['recall']:.3f} Spec={m['specificity']:.3f} "
+                  f"thr={m['thr']:.2f}  [TP={m['TP']} FP={m['FP']} FN={m['FN']} TN={m['TN']}] ({sec}s)", flush=True)
             if run:
                 run.log({'epoch': ep, 'train_loss': m['train_loss'], 'sec': sec,
-                         'val/AP': m['ap'], 'val/F1': m['f1'], 'val/precision': m['precision'],
+                         'val/AP': m['ap'], 'val/AUROC': m['auroc'], 'val/F1': m['f1'],
+                         'val/precision': m['precision'],
                          'val/recall': m['recall'], 'val/thr': m['thr']}, step=ep)
             if m['ap'] > best_ap:
                 best_ap = m['ap']
@@ -150,7 +166,7 @@ def main():
                            os.path.join(OUT, f'best{args.tag}.pt'))
                 if run:
                     run.summary['best/AP'] = best_ap; run.summary['best/epoch'] = ep
-                    run.summary.update({f'best/{k}': m[k] for k in ('f1', 'precision', 'recall', 'thr')})
+                    run.summary.update({f'best/{k}': m[k] for k in ('auroc', 'f1', 'precision', 'recall', 'thr')})
         else:                                                 # --full: save final-epoch model
             log.append(dict(epoch=ep, train_loss=tot / len(tr), sec=sec))
             print(f"ep{ep:02d} loss={tot / len(tr):.3f} (full-train, {sec}s)", flush=True)

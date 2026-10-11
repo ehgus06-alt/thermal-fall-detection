@@ -62,34 +62,55 @@ def augment_stack(seg):
         seg = np.clip(seg + np.random.normal(0, np.random.uniform(2, 10), seg.shape), 0, 255)
     return seg.astype(np.float32)
 
-def make_window_feat(stack, s, W, motion_thr=12, augment=False):
-    """stack: uint8 [N,H,W]; returns float32 [3,H,W] normalized with ImageNet stats."""
+def make_window_feat(stack, s, W, motion_thr=12, augment=False, input_mode='full'):
+    """stack: uint8 [N,H,W]; returns float32 [3,H,W] normalized with ImageNet stats.
+
+    input_mode selects which 3 channels the window becomes (MHI ablation). All modes
+    stay 3-channel so the ImageNet-pretrained backbone is reused unchanged:
+      full   = [gray_t, MHI, MEI]                 (proposed)
+      still  = [gray_t, gray_t, gray_t]           (no temporal info at all)
+      stack  = [gray_{t-16}, gray_{t-8}, gray_t]  (raw frame stack: motion but no MHI summary)
+      no_mhi = [gray_t, MEI, gray_t]              (drop MHI, keep motion-energy)
+    """
     seg = stack[s:s+W].astype(np.float32)            # [W,H,Wd]
     H, Wd = seg.shape[1], seg.shape[2]
     if seg.shape[0] < W:                              # pad short (edge clips) by repeat
         seg = np.concatenate([seg, np.repeat(seg[-1:], W - seg.shape[0], 0)], 0)
     if augment:
         seg = augment_stack(seg)
-    diffs = np.abs(np.diff(seg, axis=0))             # [W-1,H,Wd]
-    mask = diffs > motion_thr
-    # MHI: decay from W..0
-    mhi = np.zeros((H, Wd), np.float32)
-    for k in range(mask.shape[0]):
-        mhi = np.where(mask[k], float(W), np.maximum(mhi - 1.0, 0.0))
-    mhi /= float(W)
-    mei = diffs.max(axis=0) / 255.0                  # motion energy
-    gray = seg[-1] / 255.0                           # last frame
-    feat = np.stack([gray, mhi, mei], axis=-1)       # [H,Wd,3]
+    gray = seg[-1] / 255.0                            # last frame (t)
+    if input_mode == 'still':
+        feat = np.stack([gray, gray, gray], axis=-1)              # [H,Wd,3]
+    elif input_mode == 'stack':
+        n = seg.shape[0]                              # frames at t-16, t-8, t (clamp at clip start)
+        f16 = seg[max(0, n - 1 - 16)] / 255.0
+        f8  = seg[max(0, n - 1 - 8)] / 255.0
+        feat = np.stack([f16, f8, gray], axis=-1)
+    else:                                             # full / no_mhi need motion
+        diffs = np.abs(np.diff(seg, axis=0))         # [W-1,H,Wd]
+        mei = diffs.max(axis=0) / 255.0              # motion energy
+        if input_mode == 'no_mhi':
+            feat = np.stack([gray, mei, gray], axis=-1)
+        else:                                         # full
+            mask = diffs > motion_thr
+            # MHI: decay from W..0
+            mhi = np.zeros((H, Wd), np.float32)
+            for k in range(mask.shape[0]):
+                mhi = np.where(mask[k], float(W), np.maximum(mhi - 1.0, 0.0))
+            mhi /= float(W)
+            feat = np.stack([gray, mhi, mei], axis=-1)
     feat = (feat - IMAGENET_MEAN) / IMAGENET_STD
     return np.transpose(feat, (2, 0, 1)).copy()      # [3,H,W]
 
 class ClipBagDataset(Dataset):
     """Returns a bag of K windows per clip. Train: random K. Eval: evenly-spaced up to max_eval."""
-    def __init__(self, records, W=24, stride=8, K=8, train=True, max_eval=16, augment=False):
+    def __init__(self, records, W=24, stride=8, K=8, train=True, max_eval=16, augment=False,
+                 input_mode='full'):
         self.records = records
         self.W, self.stride, self.K = W, stride, K
         self.train, self.max_eval = train, max_eval
         self.augment = augment
+        self.input_mode = input_mode
         self._cache = {}
 
     def _stack(self, rec):
@@ -118,7 +139,8 @@ class ClipBagDataset(Dataset):
             else:
                 chosen = starts
         aug = self.augment and self.train
-        feats = np.stack([make_window_feat(stack, s, self.W, augment=aug) for s in chosen], 0)  # [K,3,H,W]
+        feats = np.stack([make_window_feat(stack, s, self.W, augment=aug, input_mode=self.input_mode)
+                          for s in chosen], 0)  # [K,3,H,W]
         return torch.from_numpy(feats), torch.tensor(float(rec['label'])), i
 
 def collate_bags(batch):
