@@ -74,8 +74,9 @@ def main():
                     help="also run flir->khan cross eval (default ON; needs both sources cached)")
     ap.add_argument("--no_cross", dest="cross", action="store_false")
     ap.add_argument("--skip_existing", action="store_true",
-                    help="skip a training run if its checkpoint already exists "
-                         "(and its streaming eval if that json is newer than the checkpoint)")
+                    help="skip a training run that already FINISHED (checkpoint + train log), "
+                         "and its streaming eval if that json is newer than the checkpoint; "
+                         "a run killed mid-training (checkpoint but no log) is retrained")
     ap.add_argument("--integ", action="store_true",
                     help="data-integration experiment: BASE->EVAL vs BASE+ADD->EVAL on the same test set")
     ap.add_argument("--integ_base", default="flir", help="base training source (default flir)")
@@ -100,7 +101,9 @@ def main():
                       "--split_seed", str(args.split_seed), "--epochs", str(args.epochs)]
             if args.augment:
                 common.append("--augment")
-            if not (args.skip_existing and os.path.exists(ck_in)):
+            # "done" = log exists: train.py saves best*.pt DURING training but writes the log only
+            # at the end, so a killed run (ckpt but no log) is retrained instead of silently skipped
+            if not (args.skip_existing and os.path.exists(ck_in) and os.path.exists(log_in)):
                 if not run(common + ["--train_source", "all", "--eval_source", "all", "--tag", tag_in]):
                     print(f"!! in-domain train failed: {mode} s{seed}", flush=True)
             row = best_val_row(log_in) if os.path.exists(log_in) else None
@@ -131,7 +134,7 @@ def main():
                 tag_x = f"_{mode}_s{seed}_cross"
                 log_x = os.path.join(OUT, f"train_log{tag_x}.json")
                 ck_x  = os.path.join(OUT, f"best{tag_x}.pt")
-                if not (args.skip_existing and os.path.exists(ck_x)):
+                if not (args.skip_existing and os.path.exists(ck_x) and os.path.exists(log_x)):
                     if not run(common + ["--train_source", "flir", "--eval_source", "khan", "--tag", tag_x]):
                         print(f"!! cross train failed (need flir+khan cached): {mode} s{seed}", flush=True)
                 rowx = best_val_row(log_x) if os.path.exists(log_x) else None
@@ -152,7 +155,7 @@ def main():
                     ck = os.path.join(OUT, f"best{tag}.pt")
                     lg = os.path.join(OUT, f"train_log{tag}.json")
                     done_above = tag.endswith("_cross") and args.cross
-                    if not done_above and not (args.skip_existing and os.path.exists(ck)):
+                    if not done_above and not (args.skip_existing and os.path.exists(ck) and os.path.exists(lg)):
                         if not run(common + ["--train_source", "+".join(toks), "--eval_source", ev, "--tag", tag]):
                             print(f"!! integration train failed: {src}->{ev} {mode} s{seed}", flush=True)
                     r = best_val_row(lg) if os.path.exists(lg) else None
