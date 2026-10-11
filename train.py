@@ -75,8 +75,10 @@ def main():
     ap.add_argument('--input_mode', default='full', choices=['full', 'still', 'stack', 'no_mhi'],
                     help='MHI ablation: full=[gray,MHI,MEI], still=[gray,gray,gray], '
                          'stack=[t-16,t-8,t], no_mhi=[gray,MEI,gray]')
-    ap.add_argument('--train_source', default='all', help="'all' | 'flir' | 'khan'")
-    ap.add_argument('--eval_source', default='all', help="'all' | 'flir' | 'khan' (differ from train => cross-dataset)")
+    ap.add_argument('--train_source', default='all',
+                    help="'all' | one source (flir/khan/silver) | '+'-combination, e.g. flir+silver")
+    ap.add_argument('--eval_source', default='all',
+                    help="same syntax; a different source set => cross-dataset (train on A, test on B)")
     ap.add_argument('--tag', default='', help='suffix for checkpoint/log filenames')
     ap.add_argument('--full', action='store_true', help='train on ALL clips, no val split (final deploy model)')
     ap.add_argument('--augment', action='store_true', help='train-time augmentation (flip/shift/bright/noise/blur/polarity)')
@@ -92,17 +94,36 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     man = load_manifest()
-    pick = lambda s: man if s == 'all' else [r for r in man if r.get('source') == s]
+    known = sorted({r.get('source') for r in man})
+    def srcset(s):
+        """'all' | 'flir' | 'flir+silver' ... -> validated set of source names."""
+        if s == 'all':
+            return set(known)
+        toks = {t.strip() for t in s.split('+') if t.strip()}
+        bad = toks - set(known)
+        if bad:
+            raise SystemExit(f"unknown source(s) {sorted(bad)}; cached: {known} (combine with '+', e.g. flir+silver)")
+        return toks
+    # manifest order is preserved, so 'all' / single sources select exactly the same list as before
+    pick = lambda s: [r for r in man if r.get('source') in srcset(s)]
     from collections import Counter
     comp = lambda rows: dict(Counter(r.get('source') for r in rows))
+    tr_set, ev_set = srcset(args.train_source), srcset(args.eval_source)
     if args.full:                                             # final deploy: ALL clips, no val
         tr, va = pick(args.train_source), None
-    elif args.train_source == args.eval_source:               # in-domain: random split
+    elif tr_set == ev_set:                                    # in-domain: random split
         pool = pick(args.train_source)
         tr, va = train_test_split(pool, test_size=0.2,
                                   stratify=[r['label'] for r in pool], random_state=args.split_seed)
-    else:                                                     # cross-dataset: train on one, test on other
+    else:                                                     # cross-dataset: train on A(+B), test on C
         tr, va = pick(args.train_source), pick(args.eval_source)
+        if tr_set & ev_set:                                   # overlapping sources: never train on eval clips
+            held = {(r['cls'], r['clip']) for r in va}
+            tr = [r for r in tr if (r['cls'], r['clip']) not in held]
+            print(f"note: train/eval sources overlap {sorted(tr_set & ev_set)} -> "
+                  f"{len(held)} eval clips excluded from training", flush=True)
+            if not tr:
+                raise SystemExit("no training clips left after excluding eval clips; use disjoint sources")
 
     if va is None:
         print(f"FULL train[{args.train_source}] {len(tr)} clips {comp(tr)} "
