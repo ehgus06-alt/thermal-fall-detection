@@ -4,8 +4,10 @@ into the cache, tagged source='silver'. Handles clips whose frames are split acr
 zips by indexing all three globally first. Same Lepton-emulation preprocessing as training.
 Writes cache/{Fall,NonFall}/SILVER_*.npy and cache/manifest_silver.json.
 
-NOTE: the source zips are capped at 65535 entries each (non-ZIP64), so a few frames past
-that boundary are unreadable; clips are still ~complete and MIN_FRAMES filters short ones.
+NOTE: Drive splits the download into parts of at most 65,535 files each (001/002 are ZIP64,
+complete; a raw local-header scan finds no entries outside the central directory). 118 clips
+straddle part boundaries, which is why all parts are indexed together. Verified: all 812 clips
+are contiguous frame2..frameN with no gaps (the dataset itself numbers frames from 2) -> no loss.
 """
 import os, re, io, json, zipfile, collections
 import numpy as np
