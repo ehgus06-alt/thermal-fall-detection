@@ -1,0 +1,116 @@
+val clips: 241 (fall 171 / ADL 70)
+_still_s0  orig    AP=0.913 AUROC=0.808 F1=0.858 Spec=0.343
+_still_s0  half    AP=0.910 AUROC=0.800 F1=0.850 Spec=0.329 | @orig-thr 0.12: R=0.906 Spec=0.414
+_still_s0  third   AP=0.902 AUROC=0.785 F1=0.853 Spec=0.386 | @orig-thr 0.12: R=0.836 Spec=0.471
+_still_s0  drop20  AP=0.912 AUROC=0.802 F1=0.854 Spec=0.414 | @orig-thr 0.12: R=0.930 Spec=0.386
+_still_s0  double  AP=0.920 AUROC=0.822 F1=0.863 Spec=0.300 | @orig-thr 0.12: R=0.977 Spec=0.300
+   sanity _still_s0: orig AP - eval_stream AP = -0.0002
+_still_s1  orig    AP=0.917 AUROC=0.812 F1=0.859 Spec=0.257
+_still_s1  half    AP=0.911 AUROC=0.799 F1=0.864 Spec=0.343 | @orig-thr 0.05: R=0.965 Spec=0.343
+_still_s1  third   AP=0.901 AUROC=0.783 F1=0.856 Spec=0.443 | @orig-thr 0.05: R=0.918 Spec=0.443
+_still_s1  drop20  AP=0.912 AUROC=0.800 F1=0.865 Spec=0.314 | @orig-thr 0.05: R=0.982 Spec=0.243
+_still_s1  double  AP=0.929 AUROC=0.840 F1=0.868 Spec=0.257 | @orig-thr 0.05: R=1.000 Spec=0.200
+   sanity _still_s1: orig AP - eval_stream AP = +0.0000
+_still_s2  orig    AP=0.929 AUROC=0.839 F1=0.860 Spec=0.486
+_still_s2  half    AP=0.921 AUROC=0.819 F1=0.853 Spec=0.486 | @orig-thr 0.20: R=0.836 Spec=0.571
+_still_s2  third   AP=0.908 AUROC=0.792 F1=0.840 Spec=0.386 | @orig-thr 0.20: R=0.754 Spec=0.629
+_still_s2  drop20  AP=0.929 AUROC=0.836 F1=0.854 Spec=0.300 | @orig-thr 0.20: R=0.877 Spec=0.457
+_still_s2  double  AP=0.934 AUROC=0.851 F1=0.869 Spec=0.414 | @orig-thr 0.20: R=0.953 Spec=0.414
+   sanity _still_s2: orig AP - eval_stream AP = -0.0001
+_stack_s0  orig    AP=0.961 AUROC=0.917 F1=0.915 Spec=0.700
+_stack_s0  half    AP=0.958 AUROC=0.910 F1=0.906 Spec=0.700 | @orig-thr 0.40: R=0.865 Spec=0.829
+_stack_s0  third   AP=0.922 AUROC=0.835 F1=0.876 Spec=0.657 | @orig-thr 0.40: R=0.626 Spec=0.843
+_stack_s0  drop20  AP=0.963 AUROC=0.922 F1=0.916 Spec=0.757 | @orig-thr 0.40: R=0.936 Spec=0.714
+_stack_s0  double  AP=0.955 AUROC=0.903 F1=0.908 Spec=0.643 | @orig-thr 0.40: R=0.959 Spec=0.600
+   sanity _stack_s0: orig AP - eval_stream AP = +0.0000
+_stack_s1  orig    AP=0.961 AUROC=0.918 F1=0.934 Spec=0.657
+_stack_s1  half    AP=0.956 AUROC=0.914 F1=0.931 Spec=0.671 | @orig-thr 0.30: R=0.947 Spec=0.700
+_stack_s1  third   AP=0.920 AUROC=0.856 F1=0.892 Spec=0.657 | @orig-thr 0.30: R=0.772 Spec=0.829
+_stack_s1  drop20  AP=0.966 AUROC=0.927 F1=0.933 Spec=0.700 | @orig-thr 0.30: R=0.994 Spec=0.657
+_stack_s1  double  AP=0.947 AUROC=0.892 F1=0.922 Spec=0.586 | @orig-thr 0.30: R=1.000 Spec=0.571
+   sanity _stack_s1: orig AP - eval_stream AP = +0.0000
+_stack_s2  orig    AP=0.962 AUROC=0.921 F1=0.931 Spec=0.786
+_stack_s2  half    AP=0.950 AUROC=0.905 F1=0.926 Spec=0.657 | @orig-thr 0.40: R=0.749 Spec=0.843
+_stack_s2  third   AP=0.924 AUROC=0.848 F1=0.875 Spec=0.614 | @orig-thr 0.40: R=0.579 Spec=0.914
+_stack_s2  drop20  AP=0.957 AUROC=0.915 F1=0.925 Spec=0.786 | @orig-thr 0.40: R=0.918 Spec=0.800
+_stack_s2  double  AP=0.952 AUROC=0.900 F1=0.918 Spec=0.614 | @orig-thr 0.40: R=0.971 Spec=0.614
+   sanity _stack_s2: orig AP - eval_stream AP = +0.0000
+_no_mhi_s0 orig    AP=0.952 AUROC=0.900 F1=0.914 Spec=0.657
+_no_mhi_s0 half    AP=0.893 AUROC=0.804 F1=0.876 Spec=0.600 | @orig-thr 0.30: R=0.807 Spec=0.743
+_no_mhi_s0 third   AP=0.807 AUROC=0.575 F1=0.614 Spec=0.671 | @orig-thr 0.30: R=0.374 Spec=0.800
+_no_mhi_s0 drop20  AP=0.948 AUROC=0.893 F1=0.921 Spec=0.629 | @orig-thr 0.30: R=0.936 Spec=0.629
+_no_mhi_s0 double  AP=0.959 AUROC=0.906 F1=0.906 Spec=0.629 | @orig-thr 0.30: R=0.982 Spec=0.500
+   sanity _no_mhi_s0: orig AP - eval_stream AP = +0.0000
+_no_mhi_s1 orig    AP=0.935 AUROC=0.866 F1=0.895 Spec=0.500
+_no_mhi_s1 half    AP=0.900 AUROC=0.804 F1=0.860 Spec=0.657 | @orig-thr 0.17: R=0.871 Spec=0.614
+_no_mhi_s1 third   AP=0.773 AUROC=0.521 F1=0.578 Spec=0.529 | @orig-thr 0.17: R=0.386 Spec=0.743
+_no_mhi_s1 drop20  AP=0.937 AUROC=0.871 F1=0.893 Spec=0.643 | @orig-thr 0.17: R=0.936 Spec=0.543
+_no_mhi_s1 double  AP=0.933 AUROC=0.869 F1=0.909 Spec=0.614 | @orig-thr 0.17: R=0.994 Spec=0.343
+   sanity _no_mhi_s1: orig AP - eval_stream AP = -0.0000
+_no_mhi_s2 orig    AP=0.961 AUROC=0.922 F1=0.926 Spec=0.629
+_no_mhi_s2 half    AP=0.917 AUROC=0.834 F1=0.895 Spec=0.743 | @orig-thr 0.15: R=0.895 Spec=0.714
+_no_mhi_s2 third   AP=0.819 AUROC=0.587 F1=0.632 Spec=0.657 | @orig-thr 0.15: R=0.421 Spec=0.729
+_no_mhi_s2 drop20  AP=0.958 AUROC=0.914 F1=0.931 Spec=0.671 | @orig-thr 0.15: R=0.988 Spec=0.671
+_no_mhi_s2 double  AP=0.962 AUROC=0.924 F1=0.924 Spec=0.700 | @orig-thr 0.15: R=1.000 Spec=0.514
+   sanity _no_mhi_s2: orig AP - eval_stream AP = +0.0000
+_full_s0   orig    AP=0.967 AUROC=0.921 F1=0.899 Spec=0.471
+_full_s0   half    AP=0.961 AUROC=0.916 F1=0.910 Spec=0.757 | @orig-thr 0.15: R=0.971 Spec=0.543
+_full_s0   third   AP=0.965 AUROC=0.920 F1=0.909 Spec=0.614 | @orig-thr 0.15: R=0.947 Spec=0.629
+_full_s0   drop20  AP=0.965 AUROC=0.920 F1=0.902 Spec=0.729 | @orig-thr 0.15: R=0.971 Spec=0.457
+_full_s0   double  AP=0.941 AUROC=0.871 F1=0.882 Spec=0.400 | @orig-thr 0.15: R=1.000 Spec=0.143
+   sanity _full_s0: orig AP - eval_stream AP = -0.0000
+_full_s1   orig    AP=0.950 AUROC=0.897 F1=0.914 Spec=0.543
+_full_s1   half    AP=0.960 AUROC=0.912 F1=0.914 Spec=0.643 | @orig-thr 0.30: R=0.912 Spec=0.686
+_full_s1   third   AP=0.960 AUROC=0.914 F1=0.908 Spec=0.657 | @orig-thr 0.30: R=0.901 Spec=0.757
+_full_s1   drop20  AP=0.960 AUROC=0.915 F1=0.919 Spec=0.686 | @orig-thr 0.30: R=0.971 Spec=0.614
+_full_s1   double  AP=0.939 AUROC=0.874 F1=0.903 Spec=0.629 | @orig-thr 0.30: R=1.000 Spec=0.343
+   sanity _full_s1: orig AP - eval_stream AP = -0.0001
+_full_s2   orig    AP=0.971 AUROC=0.936 F1=0.918 Spec=0.629
+_full_s2   half    AP=0.965 AUROC=0.920 F1=0.910 Spec=0.757 | @orig-thr 0.40: R=0.918 Spec=0.757
+_full_s2   third   AP=0.973 AUROC=0.931 F1=0.910 Spec=0.843 | @orig-thr 0.40: R=0.836 Spec=0.843
+_full_s2   drop20  AP=0.967 AUROC=0.925 F1=0.908 Spec=0.643 | @orig-thr 0.40: R=0.953 Spec=0.643
+_full_s2   double  AP=0.956 AUROC=0.903 F1=0.903 Spec=0.629 | @orig-thr 0.40: R=0.994 Spec=0.457
+   sanity _full_s2: orig AP - eval_stream AP = +0.0000
+# Temporal robustness (no retraining)
+
+Val split seed 42: 241 clips (fall 171 / ADL 70). Checkpoints: ablation runs, seeds [0, 1, 2]. Streaming rule: stride 4, EMA 0.4, max. Mean ± std over seeds.
+
+Conditions: `orig` = unchanged; `half` = x0.5 fps (every 2nd frame); `third` = x0.33 fps (every 3rd frame); `drop20` = 20% random frame drops; `double` = x2 fps (each frame repeated)
+
+## Streaming metrics per condition
+
+| mode | condition | AP | ΔAP vs orig | AUROC | best-F1 | Spec @best-F1 | R @orig-thr | Spec @orig-thr |
+|---|---|---|---|---|---|---|---|---|
+| still | orig | 0.919 ± 0.008 | — | 0.820 ± 0.017 | 0.859 ± 0.001 | 0.362 ± 0.115 | — | — |
+| still | half | 0.914 ± 0.006 | -0.006 ± 0.002 | 0.806 ± 0.011 | 0.856 ± 0.007 | 0.386 ± 0.087 | 0.903 ± 0.064 | 0.443 ± 0.117 |
+| still | third | 0.904 ± 0.004 | -0.015 ± 0.005 | 0.786 ± 0.005 | 0.849 ± 0.008 | 0.405 ± 0.033 | 0.836 ± 0.082 | 0.514 ± 0.100 |
+| still | drop20 | 0.917 ± 0.010 | -0.002 ± 0.002 | 0.813 ± 0.020 | 0.858 ± 0.006 | 0.343 ± 0.062 | 0.930 ± 0.053 | 0.362 ± 0.109 |
+| still | double | 0.928 ± 0.007 | +0.008 ± 0.004 | 0.837 ± 0.014 | 0.867 ± 0.003 | 0.324 ± 0.081 | 0.977 ± 0.023 | 0.305 ± 0.107 |
+| stack | orig | 0.961 ± 0.000 | — | 0.919 ± 0.002 | 0.927 ± 0.010 | 0.714 ± 0.065 | — | — |
+| stack | half | 0.955 ± 0.004 | -0.006 ± 0.004 | 0.910 ± 0.005 | 0.921 ± 0.013 | 0.676 ± 0.022 | 0.854 ± 0.100 | 0.790 ± 0.079 |
+| stack | third | 0.922 ± 0.002 | -0.039 ± 0.002 | 0.846 ± 0.011 | 0.881 ± 0.010 | 0.643 ± 0.025 | 0.659 ± 0.101 | 0.862 ± 0.046 |
+| stack | drop20 | 0.962 ± 0.004 | +0.001 ± 0.005 | 0.921 ± 0.006 | 0.925 ± 0.008 | 0.748 ± 0.044 | 0.949 ± 0.040 | 0.724 ± 0.072 |
+| stack | double | 0.951 ± 0.004 | -0.010 ± 0.004 | 0.898 ± 0.006 | 0.916 ± 0.007 | 0.614 ± 0.029 | 0.977 ± 0.021 | 0.595 ± 0.022 |
+| no_mhi | orig | 0.950 ± 0.013 | — | 0.896 ± 0.029 | 0.912 ± 0.016 | 0.595 ± 0.084 | — | — |
+| no_mhi | half | 0.903 ± 0.012 | -0.046 ± 0.012 | 0.814 ± 0.018 | 0.877 ± 0.018 | 0.667 ± 0.072 | 0.858 ± 0.045 | 0.690 ± 0.068 |
+| no_mhi | third | 0.800 ± 0.024 | -0.150 ± 0.011 | 0.561 ± 0.035 | 0.608 ± 0.027 | 0.619 ± 0.079 | 0.394 ± 0.024 | 0.757 ± 0.038 |
+| no_mhi | drop20 | 0.948 ± 0.010 | -0.002 ± 0.004 | 0.893 ± 0.022 | 0.915 ± 0.020 | 0.648 ± 0.022 | 0.953 ± 0.030 | 0.614 ± 0.065 |
+| no_mhi | double | 0.952 ± 0.016 | +0.002 ± 0.004 | 0.900 ± 0.028 | 0.913 ± 0.010 | 0.648 ± 0.046 | 0.992 ± 0.009 | 0.452 ± 0.095 |
+| full | orig | 0.963 ± 0.011 | — | 0.918 ± 0.020 | 0.910 ± 0.010 | 0.548 ± 0.079 | — | — |
+| full | half | 0.962 ± 0.002 | -0.001 ± 0.010 | 0.916 ± 0.004 | 0.911 ± 0.002 | 0.719 ± 0.066 | 0.934 ± 0.032 | 0.662 ± 0.109 |
+| full | third | 0.966 ± 0.006 | +0.003 ± 0.006 | 0.922 ± 0.008 | 0.909 ± 0.001 | 0.705 ± 0.121 | 0.895 ± 0.056 | 0.743 ± 0.108 |
+| full | drop20 | 0.964 ± 0.003 | +0.001 ± 0.008 | 0.920 ± 0.005 | 0.910 ± 0.009 | 0.686 ± 0.043 | 0.965 ± 0.010 | 0.571 ± 0.100 |
+| full | double | 0.945 ± 0.009 | -0.017 ± 0.008 | 0.883 ± 0.018 | 0.896 ± 0.012 | 0.552 ± 0.132 | 0.998 ± 0.003 | 0.314 ± 0.159 |
+
+## Is full (MHI) more robust than stack?
+
+Paired by seed: (full drop) − (stack drop). **Positive = full degrades less.** A claim needs the mean clearly beyond ±std with the same sign for every seed.
+
+| condition | ΔAP | ΔAUROC | ΔF1 | ΔSpec |
+|---|---|---|---|---|
+| half | +0.006 ± 0.009 | +0.007 ± 0.010 | +0.007 ± 0.012 | +0.210 ± 0.108 |
+| third | +0.042 ± 0.008 | +0.076 ± 0.008 | +0.044 ± 0.008 | +0.229 ± 0.141 |
+| drop20 | +0.001 ± 0.005 | -0.001 ± 0.009 | +0.001 ± 0.004 | +0.105 ± 0.093 |
+| double | -0.007 ± 0.012 | -0.015 ± 0.020 | -0.004 ± 0.006 | +0.105 ± 0.103 |
+
+R/Spec @orig-thr: alarm threshold fixed at the best-F1 threshold found on `orig` for that checkpoint (calibrate on clean data, then the camera rate changes).
