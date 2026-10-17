@@ -1,0 +1,31 @@
+Ablation result package  (20261017_2343)
+command: run_ablation.py --modes still stack no_mhi full --seeds 0 1 2 --epochs 25 --skip_existing --integ
+NOTE: ablation runs use --augment / 25 epochs / seeds 0-2 -> not identical to the deployed runs/best.pt.
+NOTE: source mapping assumed flir=MUVIM, silver=TF-66, khan=TSF.
+NOTE: the driver died once at 21:50 (session end) and was resumed 01:14 with --skip_existing;
+      still_s2_cross was retrained from scratch. A GPU-driver BSOD (0x119) at 10-12 01:59 killed it again during
+      stack_s1; resumed 10-17 with --skip_existing (stack_s1 retrained). Completed runs were never re-run.
+
+ablation_table.md: OK
+ablation_results.json: OK
+
+== eval_stream.py --ckpt runs/best.pt : [max-EMA ...] lines ==
+[max-EMA (streaming/deployment rule)] AP=0.968  bestF1=0.915 @thr=0.40  P=0.913 R=0.918 Spec=0.786
+[max-EMA (deployment)] RECALL-FIRST (missed fall >> false alarm)
+    !! no threshold reaches R=1.00 on VAL -> the MODEL itself misses some falls; lower thr won't help. Enable --collapse-trigger as a second net and/or retrain.
+    best F2 (recall-weighted): --thr 0.06  P=0.80 R=0.99
+    --- full curve (pick your own comfort level) ---
+    thr :  P  /  R   (missed falls)
+
+== per-run streaming best-F1 (from ablation_run.log) ==
+_still_s1        [max-EMA (streaming/deployment rule)] AP=0.917  bestF1=0.859 @thr=0.05  P=0.764 R=0.982 Spec=0.257
+_still_s2        [max-EMA (streaming/deployment rule)] AP=0.929  bestF1=0.860 @thr=0.20  P=0.812 R=0.912 Spec=0.486
+_stack_s0        [max-EMA (streaming/deployment rule)] AP=0.961  bestF1=0.915 @thr=0.40  P=0.885 R=0.947 Spec=0.700
+_stack_s1        [max-EMA (streaming/deployment rule)] AP=0.961  bestF1=0.934 @thr=0.30  P=0.877 R=1.000 Spec=0.657
+_stack_s2        [max-EMA (streaming/deployment rule)] AP=0.962  bestF1=0.931 @thr=0.40  P=0.915 R=0.947 Spec=0.786
+_no_mhi_s0       [max-EMA (streaming/deployment rule)] AP=0.952  bestF1=0.914 @thr=0.30  P=0.872 R=0.959 Spec=0.657
+_no_mhi_s1       [max-EMA (streaming/deployment rule)] AP=0.935  bestF1=0.895 @thr=0.17  P=0.827 R=0.977 Spec=0.500
+_no_mhi_s2       [max-EMA (streaming/deployment rule)] AP=0.961  bestF1=0.926 @thr=0.15  P=0.867 R=0.994 Spec=0.629
+_full_s0         [max-EMA (streaming/deployment rule)] AP=0.968  bestF1=0.899 @thr=0.15  P=0.821 R=0.994 Spec=0.471
+_full_s1         [max-EMA (streaming/deployment rule)] AP=0.950  bestF1=0.914 @thr=0.30  P=0.842 R=1.000 Spec=0.543
+_full_s2         [max-EMA (streaming/deployment rule)] AP=0.971  bestF1=0.918 @thr=0.40  P=0.865 R=0.977 Spec=0.629

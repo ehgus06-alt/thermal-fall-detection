@@ -1,0 +1,280 @@
+eval ckpt=best.pt  input_mode=full  W=24  split_seed=42
+NonFall/SILVER_Tra_65_NonFall_09 y=0 maxp=0.01 maxEMA=0.01
+NonFall/SILVER_Val_17_NonFall_02 y=0 maxp=0.11 maxEMA=0.05
+NonFall/ NonFall89 y=0 maxp=0.60 maxEMA=0.27
+Fall/SILVER_Val_31_Fall_09 y=1 maxp=0.93 maxEMA=0.69
+Fall/SILVER_Tra_57_Fall_06 y=1 maxp=1.00 maxEMA=1.00
+Fall/   Fall207 y=1 maxp=0.98 maxEMA=0.94
+Fall/SILVER_Tra_20_Fall_06 y=1 maxp=0.95 maxEMA=0.59
+Fall/SILVER_Tra_51_Fall_13 y=1 maxp=1.00 maxEMA=0.99
+NonFall/ NonFall13 y=0 maxp=0.21 maxEMA=0.15
+NonFall/SILVER_Tra_30_NonFall_02 y=0 maxp=0.25 maxEMA=0.10
+NonFall/SILVER_Tra_10_NonFall_06 y=0 maxp=0.97 maxEMA=0.58
+Fall/SILVER_Tra_40_Fall_12 y=1 maxp=0.98 maxEMA=0.97
+NonFall/ NonFall21 y=0 maxp=0.92 maxEMA=0.40
+Fall/   Fall191 y=1 maxp=0.96 maxEMA=0.90
+Fall/SILVER_Tra_30_Fall_03 y=1 maxp=0.56 maxEMA=0.42
+Fall/    Fall59 y=1 maxp=0.96 maxEMA=0.80
+NonFall/SILVER_Tra_41_NonFall_04 y=0 maxp=0.55 maxEMA=0.31
+Fall/SILVER_Tra_48_Fall_06 y=1 maxp=1.00 maxEMA=0.75
+Fall/SILVER_Val_48_Fall_04 y=1 maxp=0.77 maxEMA=0.31
+Fall/KHAN_Fall6 y=1 maxp=0.92 maxEMA=0.84
+Fall/SILVER_Tra_62_Fall_06 y=1 maxp=0.93 maxEMA=0.58
+NonFall/SILVER_Tra_20_NonFall_02 y=0 maxp=0.03 maxEMA=0.01
+Fall/SILVER_Tra_42_Fall_11 y=1 maxp=0.99 maxEMA=0.81
+Fall/SILVER_Tra_15_Fall_05 y=1 maxp=1.00 maxEMA=0.86
+Fall/SILVER_Val_42_Fall_06 y=1 maxp=0.99 maxEMA=0.89
+NonFall/SILVER_Tra_34_NonFall_02 y=0 maxp=0.89 maxEMA=0.85
+Fall/SILVER_Tra_55_Fall_02 y=1 maxp=0.99 maxEMA=0.96
+Fall/SILVER_Tra_47_Fall_04 y=1 maxp=0.99 maxEMA=0.97
+NonFall/SILVER_Tra_55_NonFall_03 y=0 maxp=0.01 maxEMA=0.00
+Fall/SILVER_Tra_24_Fall_04 y=1 maxp=0.99 maxEMA=0.83
+NonFall/SILVER_Val_13_NonFall_01 y=0 maxp=0.40 maxEMA=0.16
+NonFall/SILVER_Val_66_NonFall_03 y=0 maxp=0.00 maxEMA=0.00
+Fall/SILVER_Tra_36_Fall_10 y=1 maxp=0.91 maxEMA=0.63
+Fall/   Fall116 y=1 maxp=0.96 maxEMA=0.87
+Fall/SILVER_Tra_56_Fall_10 y=1 maxp=1.00 maxEMA=0.88
+Fall/SILVER_Tra_54_Fall_03 y=1 maxp=0.10 maxEMA=0.06
+NonFall/ NonFall52 y=0 maxp=0.64 maxEMA=0.38
+Fall/SILVER_Tra_12_Fall_05 y=1 maxp=0.65 maxEMA=0.28
+NonFall/SILVER_Tra_02_NonFall_01 y=0 maxp=0.00 maxEMA=0.00
+NonFall/ NonFall81 y=0 maxp=0.22 maxEMA=0.09
+NonFall/SILVER_Tra_63_NonFall_01 y=0 maxp=0.52 maxEMA=0.30
+Fall/   Fall118 y=1 maxp=0.98 maxEMA=0.92
+Fall/    Fall15 y=1 maxp=0.95 maxEMA=0.78
+Fall/SILVER_Tra_56_Fall_04 y=1 maxp=1.00 maxEMA=0.99
+Fall/SILVER_Tra_51_Fall_10 y=1 maxp=0.91 maxEMA=0.65
+Fall/    Fall37 y=1 maxp=0.98 maxEMA=0.92
+Fall/SILVER_Tra_60_Fall_05 y=1 maxp=0.99 maxEMA=0.72
+Fall/   Fall294 y=1 maxp=0.90 maxEMA=0.74
+Fall/    Fall36 y=1 maxp=0.98 maxEMA=0.91
+Fall/   Fall154 y=1 maxp=0.99 maxEMA=0.94
+NonFall/SILVER_Tra_12_NonFall_06 y=0 maxp=0.59 maxEMA=0.48
+Fall/SILVER_Tra_28_Fall_01 y=1 maxp=0.84 maxEMA=0.60
+Fall/   Fall128 y=1 maxp=0.99 maxEMA=0.96
+Fall/SILVER_Tra_07_Fall_03 y=1 maxp=0.21 maxEMA=0.08
+Fall/SILVER_Tra_43_Fall_05 y=1 maxp=0.99 maxEMA=0.79
+Fall/SILVER_Tra_56_Fall_02 y=1 maxp=0.98 maxEMA=0.94
+Fall/SILVER_Tra_50_Fall_09 y=1 maxp=0.49 maxEMA=0.27
+NonFall/SILVER_Val_51_NonFall_03 y=0 maxp=0.19 maxEMA=0.10
+Fall/SILVER_Tra_23_Fall_05 y=1 maxp=0.93 maxEMA=0.72
+Fall/   Fall119 y=1 maxp=0.99 maxEMA=0.87
+Fall/SILVER_Tra_54_Fall_01 y=1 maxp=0.95 maxEMA=0.82
+Fall/SILVER_Val_30_Fall_10 y=1 maxp=0.99 maxEMA=0.84
+NonFall/ NonFall48 y=0 maxp=0.15 maxEMA=0.09
+NonFall/  NonFall1 y=0 maxp=0.92 maxEMA=0.70
+Fall/SILVER_Tra_05_Fall_03 y=1 maxp=0.79 maxEMA=0.45
+Fall/KHAN_Fall14 y=1 maxp=0.99 maxEMA=0.99
+Fall/   Fall161 y=1 maxp=0.94 maxEMA=0.91
+Fall/SILVER_Tra_26_Fall_04 y=1 maxp=0.90 maxEMA=0.77
+Fall/SILVER_Tra_66_Fall_08 y=1 maxp=0.71 maxEMA=0.39
+Fall/    Fall93 y=1 maxp=0.95 maxEMA=0.87
+NonFall/SILVER_Tra_27_NonFall_03 y=0 maxp=0.94 maxEMA=0.71
+Fall/SILVER_Tra_37_Fall_05 y=1 maxp=0.93 maxEMA=0.61
+Fall/   Fall165 y=1 maxp=0.99 maxEMA=0.97
+NonFall/SILVER_Tra_53_NonFall_01 y=0 maxp=0.00 maxEMA=0.00
+Fall/KHAN_Fall11 y=1 maxp=0.99 maxEMA=0.99
+Fall/SILVER_Tra_33_Fall_07 y=1 maxp=0.68 maxEMA=0.27
+Fall/SILVER_Tra_32_Fall_01 y=1 maxp=1.00 maxEMA=0.92
+Fall/    Fall76 y=1 maxp=1.00 maxEMA=0.98
+Fall/SILVER_Tra_27_Fall_04 y=1 maxp=0.95 maxEMA=0.79
+NonFall/SILVER_Tra_35_NonFall_01 y=0 maxp=0.78 maxEMA=0.59
+Fall/SILVER_Tra_52_Fall_03 y=1 maxp=0.98 maxEMA=0.62
+Fall/SILVER_Val_08_Fall_02 y=1 maxp=0.99 maxEMA=0.84
+Fall/SILVER_Tra_48_Fall_05 y=1 maxp=0.99 maxEMA=0.66
+Fall/   Fall121 y=1 maxp=0.98 maxEMA=0.91
+Fall/SILVER_Tra_47_Fall_07 y=1 maxp=0.95 maxEMA=0.86
+Fall/SILVER_Tra_20_Fall_02 y=1 maxp=0.63 maxEMA=0.56
+NonFall/SILVER_Tra_34_NonFall_01 y=0 maxp=0.65 maxEMA=0.38
+Fall/    Fall48 y=1 maxp=0.99 maxEMA=0.91
+Fall/   Fall295 y=1 maxp=0.98 maxEMA=0.95
+NonFall/SILVER_Tra_34_NonFall_03 y=0 maxp=0.99 maxEMA=0.47
+NonFall/ NonFall50 y=0 maxp=0.84 maxEMA=0.38
+Fall/SILVER_Val_39_Fall_02 y=1 maxp=0.99 maxEMA=0.78
+Fall/SILVER_Tra_24_Fall_03 y=1 maxp=0.77 maxEMA=0.45
+NonFall/SILVER_Tra_13_NonFall_05 y=0 maxp=0.00 maxEMA=0.00
+Fall/   Fall200 y=1 maxp=0.96 maxEMA=0.81
+Fall/SILVER_Tra_62_Fall_07 y=1 maxp=0.98 maxEMA=0.51
+Fall/SILVER_Tra_20_Fall_03 y=1 maxp=1.00 maxEMA=0.76
+NonFall/ NonFall34 y=0 maxp=0.91 maxEMA=0.75
+Fall/KHAN_Fall31 y=1 maxp=0.96 maxEMA=0.93
+Fall/SILVER_Val_38_Fall_04 y=1 maxp=0.81 maxEMA=0.72
+Fall/SILVER_Val_26_Fall_05 y=1 maxp=1.00 maxEMA=0.78
+Fall/SILVER_Tra_50_Fall_01 y=1 maxp=0.70 maxEMA=0.41
+NonFall/ NonFall20 y=0 maxp=0.27 maxEMA=0.11
+Fall/KHAN_Fall10 y=1 maxp=1.00 maxEMA=0.99
+Fall/SILVER_Val_42_Fall_07 y=1 maxp=1.00 maxEMA=0.71
+Fall/    Fall11 y=1 maxp=0.94 maxEMA=0.91
+Fall/SILVER_Val_43_Fall_10 y=1 maxp=0.75 maxEMA=0.55
+NonFall/SILVER_Tra_57_NonFall_03 y=0 maxp=0.15 maxEMA=0.06
+Fall/SILVER_Tra_56_Fall_03 y=1 maxp=1.00 maxEMA=0.95
+Fall/SILVER_Tra_61_Fall_02 y=1 maxp=0.23 maxEMA=0.11
+Fall/SILVER_Tra_40_Fall_07 y=1 maxp=0.85 maxEMA=0.74
+Fall/KHAN_Fall19 y=1 maxp=0.94 maxEMA=0.87
+Fall/   Fall264 y=1 maxp=0.95 maxEMA=0.86
+Fall/SILVER_Tra_17_Fall_06 y=1 maxp=0.98 maxEMA=0.83
+Fall/SILVER_Val_25_Fall_06 y=1 maxp=0.38 maxEMA=0.15
+NonFall/ NonFall53 y=0 maxp=0.68 maxEMA=0.28
+NonFall/ NonFall43 y=0 maxp=0.38 maxEMA=0.31
+NonFall/SILVER_Tra_05_NonFall_01 y=0 maxp=0.02 maxEMA=0.01
+Fall/   Fall299 y=1 maxp=0.95 maxEMA=0.86
+Fall/   Fall101 y=1 maxp=0.98 maxEMA=0.85
+NonFall/SILVER_Tra_42_NonFall_02 y=0 maxp=0.00 maxEMA=0.00
+Fall/SILVER_Val_21_Fall_01 y=1 maxp=1.00 maxEMA=0.87
+Fall/   Fall203 y=1 maxp=0.98 maxEMA=0.93
+NonFall/SILVER_Val_18_NonFall_04 y=0 maxp=0.62 maxEMA=0.52
+Fall/SILVER_Tra_65_Fall_03 y=1 maxp=0.94 maxEMA=0.65
+Fall/SILVER_Tra_35_Fall_07 y=1 maxp=0.99 maxEMA=0.79
+NonFall/SILVER_Tra_26_NonFall_02 y=0 maxp=0.00 maxEMA=0.00
+Fall/SILVER_Tra_49_Fall_08 y=1 maxp=1.00 maxEMA=0.82
+Fall/SILVER_Tra_11_Fall_06 y=1 maxp=0.98 maxEMA=0.93
+Fall/SILVER_Tra_54_Fall_04 y=1 maxp=0.92 maxEMA=0.71
+Fall/SILVER_Val_36_Fall_06 y=1 maxp=1.00 maxEMA=0.67
+Fall/SILVER_Tra_29_Fall_11 y=1 maxp=0.98 maxEMA=0.68
+Fall/SILVER_Tra_39_Fall_11 y=1 maxp=0.60 maxEMA=0.34
+NonFall/SILVER_Tra_61_NonFall_01 y=0 maxp=0.02 maxEMA=0.01
+Fall/    Fall91 y=1 maxp=0.98 maxEMA=0.91
+Fall/SILVER_Val_34_Fall_07 y=1 maxp=1.00 maxEMA=0.94
+Fall/    Fall97 y=1 maxp=0.92 maxEMA=0.73
+Fall/     Fall4 y=1 maxp=0.99 maxEMA=0.86
+Fall/SILVER_Tra_61_Fall_03 y=1 maxp=0.24 maxEMA=0.12
+Fall/    Fall87 y=1 maxp=0.93 maxEMA=0.85
+Fall/SILVER_Tra_16_Fall_06 y=1 maxp=0.59 maxEMA=0.53
+NonFall/SILVER_Tra_40_NonFall_03 y=0 maxp=0.37 maxEMA=0.15
+NonFall/SILVER_Tra_21_NonFall_03 y=0 maxp=0.67 maxEMA=0.56
+Fall/SILVER_Val_07_Fall_05 y=1 maxp=0.73 maxEMA=0.61
+NonFall/ NonFall58 y=0 maxp=0.74 maxEMA=0.35
+Fall/SILVER_Val_57_Fall_03 y=1 maxp=0.99 maxEMA=0.73
+Fall/SILVER_Tra_36_Fall_04 y=1 maxp=1.00 maxEMA=0.90
+NonFall/SILVER_Val_33_NonFall_01 y=0 maxp=0.37 maxEMA=0.27
+Fall/SILVER_Tra_15_Fall_06 y=1 maxp=0.72 maxEMA=0.63
+NonFall/SILVER_Tra_49_NonFall_01 y=0 maxp=0.97 maxEMA=0.88
+NonFall/SILVER_Val_32_NonFall_04 y=0 maxp=0.00 maxEMA=0.00
+Fall/SILVER_Tra_28_Fall_08 y=1 maxp=1.00 maxEMA=0.92
+Fall/    Fall55 y=1 maxp=0.94 maxEMA=0.81
+Fall/SILVER_Tra_12_Fall_01 y=1 maxp=1.00 maxEMA=0.77
+NonFall/SILVER_Tra_43_NonFall_01 y=0 maxp=0.87 maxEMA=0.71
+NonFall/SILVER_Tra_03_NonFall_03 y=0 maxp=0.00 maxEMA=0.00
+Fall/SILVER_Val_50_Fall_08 y=1 maxp=0.83 maxEMA=0.67
+Fall/SILVER_Tra_43_Fall_09 y=1 maxp=0.98 maxEMA=0.94
+Fall/    Fall24 y=1 maxp=0.99 maxEMA=0.97
+Fall/SILVER_Val_57_Fall_07 y=1 maxp=0.92 maxEMA=0.81
+Fall/SILVER_Val_39_Fall_12 y=1 maxp=0.85 maxEMA=0.44
+Fall/SILVER_Tra_48_Fall_01 y=1 maxp=0.45 maxEMA=0.19
+NonFall/SILVER_Tra_51_NonFall_01 y=0 maxp=0.31 maxEMA=0.20
+Fall/   Fall179 y=1 maxp=0.99 maxEMA=0.96
+NonFall/SILVER_Val_64_NonFall_02 y=0 maxp=0.00 maxEMA=0.00
+Fall/   Fall107 y=1 maxp=0.99 maxEMA=0.83
+Fall/SILVER_Tra_03_Fall_01 y=1 maxp=0.99 maxEMA=0.85
+Fall/SILVER_Tra_10_Fall_06 y=1 maxp=0.87 maxEMA=0.80
+Fall/SILVER_Tra_59_Fall_02 y=1 maxp=0.99 maxEMA=0.83
+NonFall/SILVER_Tra_47_NonFall_08 y=0 maxp=0.01 maxEMA=0.00
+NonFall/ KHAN_ADL3 y=0 maxp=0.94 maxEMA=0.67
+Fall/SILVER_Tra_47_Fall_03 y=1 maxp=0.89 maxEMA=0.65
+Fall/SILVER_Tra_28_Fall_10 y=1 maxp=0.89 maxEMA=0.60
+Fall/    Fall52 y=1 maxp=0.98 maxEMA=0.81
+Fall/SILVER_Tra_06_Fall_03 y=1 maxp=1.00 maxEMA=0.94
+NonFall/SILVER_Tra_33_NonFall_06 y=0 maxp=0.00 maxEMA=0.00
+NonFall/ NonFall72 y=0 maxp=0.88 maxEMA=0.35
+Fall/    Fall54 y=1 maxp=0.94 maxEMA=0.80
+Fall/SILVER_Tra_24_Fall_06 y=1 maxp=1.00 maxEMA=0.87
+NonFall/SILVER_Val_58_NonFall_06 y=0 maxp=0.45 maxEMA=0.27
+NonFall/SILVER_Val_54_NonFall_04 y=0 maxp=0.40 maxEMA=0.16
+NonFall/SILVER_Val_66_NonFall_06 y=0 maxp=0.00 maxEMA=0.00
+NonFall/SILVER_Tra_47_NonFall_09 y=0 maxp=0.34 maxEMA=0.17
+Fall/   Fall261 y=1 maxp=0.97 maxEMA=0.94
+Fall/SILVER_Tra_40_Fall_04 y=1 maxp=0.99 maxEMA=0.99
+Fall/   Fall100 y=1 maxp=0.89 maxEMA=0.72
+Fall/SILVER_Tra_65_Fall_12 y=1 maxp=0.99 maxEMA=0.95
+NonFall/SILVER_Tra_24_NonFall_03 y=0 maxp=0.80 maxEMA=0.66
+Fall/    Fall77 y=1 maxp=0.97 maxEMA=0.89
+Fall/SILVER_Tra_29_Fall_01 y=1 maxp=1.00 maxEMA=0.83
+Fall/SILVER_Tra_10_Fall_05 y=1 maxp=1.00 maxEMA=0.78
+Fall/SILVER_Val_55_Fall_07 y=1 maxp=0.96 maxEMA=0.89
+Fall/SILVER_Tra_51_Fall_08 y=1 maxp=1.00 maxEMA=0.92
+Fall/    Fall19 y=1 maxp=1.00 maxEMA=0.92
+Fall/SILVER_Val_06_Fall_04 y=1 maxp=0.98 maxEMA=0.79
+Fall/SILVER_Tra_60_Fall_01 y=1 maxp=1.00 maxEMA=0.83
+Fall/   Fall288 y=1 maxp=0.99 maxEMA=0.95
+Fall/    Fall44 y=1 maxp=1.00 maxEMA=0.95
+Fall/   Fall126 y=1 maxp=0.96 maxEMA=0.82
+Fall/SILVER_Tra_36_Fall_05 y=1 maxp=1.00 maxEMA=0.75
+NonFall/SILVER_Tra_58_NonFall_11 y=0 maxp=0.02 maxEMA=0.01
+Fall/SILVER_Tra_32_Fall_04 y=1 maxp=1.00 maxEMA=0.93
+Fall/SILVER_Tra_21_Fall_05 y=1 maxp=1.00 maxEMA=0.83
+Fall/SILVER_Tra_63_Fall_03 y=1 maxp=1.00 maxEMA=0.99
+Fall/   Fall215 y=1 maxp=0.94 maxEMA=0.55
+Fall/   Fall239 y=1 maxp=0.86 maxEMA=0.60
+Fall/SILVER_Tra_34_Fall_02 y=1 maxp=1.00 maxEMA=0.95
+Fall/   Fall104 y=1 maxp=0.99 maxEMA=0.96
+Fall/   Fall278 y=1 maxp=0.99 maxEMA=0.86
+NonFall/ NonFall88 y=0 maxp=0.14 maxEMA=0.06
+Fall/SILVER_Tra_34_Fall_10 y=1 maxp=1.00 maxEMA=0.89
+NonFall/ NonFall49 y=0 maxp=0.12 maxEMA=0.07
+Fall/SILVER_Tra_43_Fall_03 y=1 maxp=0.98 maxEMA=0.95
+NonFall/SILVER_Tra_24_NonFall_02 y=0 maxp=0.12 maxEMA=0.05
+NonFall/SILVER_Tra_05_NonFall_02 y=0 maxp=0.01 maxEMA=0.01
+NonFall/ NonFall54 y=0 maxp=0.83 maxEMA=0.67
+Fall/SILVER_Tra_35_Fall_01 y=1 maxp=1.00 maxEMA=0.87
+Fall/KHAN_Fall27 y=1 maxp=0.86 maxEMA=0.79
+NonFall/SILVER_Val_28_NonFall_02 y=0 maxp=0.04 maxEMA=0.02
+Fall/SILVER_Tra_49_Fall_03 y=1 maxp=0.92 maxEMA=0.72
+Fall/    Fall70 y=1 maxp=0.97 maxEMA=0.84
+Fall/    Fall38 y=1 maxp=0.99 maxEMA=0.94
+Fall/SILVER_Tra_41_Fall_06 y=1 maxp=0.96 maxEMA=0.81
+Fall/SILVER_Tra_09_Fall_06 y=1 maxp=0.55 maxEMA=0.39
+Fall/SILVER_Tra_32_Fall_05 y=1 maxp=1.00 maxEMA=0.83
+Fall/   Fall171 y=1 maxp=0.98 maxEMA=0.79
+Fall/SILVER_Tra_42_Fall_09 y=1 maxp=0.91 maxEMA=0.79
+NonFall/SILVER_Tra_38_NonFall_04 y=0 maxp=0.01 maxEMA=0.01
+NonFall/SILVER_Tra_55_NonFall_05 y=0 maxp=0.01 maxEMA=0.01
+NonFall/SILVER_Tra_58_NonFall_09 y=0 maxp=0.00 maxEMA=0.00
+NonFall/SILVER_Tra_58_NonFall_01 y=0 maxp=0.00 maxEMA=0.00
+Fall/SILVER_Tra_13_Fall_02 y=1 maxp=0.99 maxEMA=0.95
+Fall/   Fall201 y=1 maxp=0.97 maxEMA=0.92
+Fall/SILVER_Tra_03_Fall_06 y=1 maxp=1.00 maxEMA=0.64
+NonFall/SILVER_Tra_40_NonFall_01 y=0 maxp=0.23 maxEMA=0.13
+Fall/SILVER_Tra_57_Fall_05 y=1 maxp=1.00 maxEMA=0.99
+Fall/    Fall95 y=1 maxp=0.88 maxEMA=0.67
+Fall/SILVER_Tra_61_Fall_01 y=1 maxp=0.05 maxEMA=0.02
+Fall/SILVER_Tra_49_Fall_02 y=1 maxp=1.00 maxEMA=0.87
+Fall/SILVER_Tra_34_Fall_06 y=1 maxp=0.99 maxEMA=0.87
+NonFall/SILVER_Tra_54_NonFall_03 y=0 maxp=0.02 maxEMA=0.01
+
+===== VAL streaming eval (n=241, pos=171) =====
+
+[max-window-prob (matches training)] AP=0.966  bestF1=0.912 @thr=0.42  P=0.864 R=0.965 Spec=0.629
+         confusion @bestF1: TP=165 FP=26 FN=6 TN=44  (missed falls=6)
+
+[max-EMA (streaming/deployment rule)] AP=0.968  bestF1=0.915 @thr=0.40  P=0.913 R=0.918 Spec=0.786
+         confusion @bestF1: TP=157 FP=15 FN=14 TN=55  (missed falls=14)
+
+[max-EMA (deployment)] RECALL-FIRST (missed fall >> false alarm)
+  !! no threshold reaches R=1.00 on VAL -> the MODEL itself misses some falls; lower thr won't help. Enable --collapse-trigger as a second net and/or retrain.
+  best F2 (recall-weighted): --thr 0.06  P=0.80 R=0.99
+  --- full curve (pick your own comfort level) ---
+   thr :  P  /  R   (missed falls)
+  0.20 : 0.85 / 0.96   (7 missed)
+  0.25 : 0.85 / 0.96   (7 missed)
+  0.30 : 0.87 / 0.94   (10 missed)
+  0.35 : 0.89 / 0.93   (12 missed)
+  0.40 : 0.91 / 0.92   (14 missed)
+  0.45 : 0.91 / 0.89   (18 missed)
+  0.50 : 0.92 / 0.89   (19 missed)
+  0.55 : 0.93 / 0.87   (22 missed)
+  0.60 : 0.94 / 0.84   (27 missed)
+  0.65 : 0.94 / 0.79   (36 missed)
+  0.70 : 0.95 / 0.74   (44 missed)
+
+========== REPORT METRICS [max-EMA @ best-F2 (no zero-miss point on VAL)] @thr=0.06 ==========
+  confusion matrix     TP=170  FP=43  FN=1  TN=27   (N=241, falls=171)
+  Recall / Sensitivity 0.994   <- missed falls: 1
+  Precision            0.798
+  Specificity          0.386
+  False-alarm rate     0.614
+  F1 / F2              0.885 / 0.948   (F2 weights recall 2x)
+  AUROC / AP(AUPRC)    0.929 / 0.968   (threshold-independent)
+  --- copy-paste CSV row ---
+  Recall,Precision,Specificity,F1,F2,AUROC,AP,MissedFalls
+  0.994,0.798,0.386,0.885,0.948,0.929,0.968,1
+[curves] matplotlib not available (No module named 'matplotlib') - skipping PNG (pip install matplotlib)
